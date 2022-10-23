@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import os
+import sys
 import time
 from datetime import datetime
 from functools import reduce
@@ -8,37 +9,60 @@ from multiprocessing import Pool
 # import resource
 # resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
 
+ARGS = {}
+for arg in sys.argv[1:]:
+    s = arg.split(':')
+    key = s[0].strip()
+    value = s[1].strip()
+    ARGS[key] = value
+def get_args(key, default=None):
+    return ARGS[key] if key in ARGS else default
+if ARGS:
+    print(ARGS)
 
 # runspec config
-SPEC = "2006" # "2000"/"2006"/"2017"
+SPEC = "2000" # "2000"/"2006"/"2017"
 SIZE = "ref"  # "test"/"train"/"ref"
 # only 2017
 TUNE = "base" # "base"/"peak"
 # 0: max, 1: single_thread, other: other
 THREADS = 1
 ignore_error = False
-print_cmd_only = True
+print_cmd_only = False
 
 # prefix config
-# cmd_prefix = "/home/lxy/instrument/pin-3.22/pin -t /home/lxy/instrument/pin_tool/DynAveBlkSIZE/obj-intel64/DynAveBlkSIZE.so "
+# cmd_prefix = "/home/lxy/instrument/pin-3.24/pin -t /home/lxy/instrument/x86_indirect_branch_analysis/TraceInsImm/obj-intel64/TraceInsImm.so -o %s -- "
 # cmd_prefix = "/home/lxy/bt/qemu-6.2.0/build/qemu-x86_64 "
-cmd_prefix = "taskset -c 8 perf stat -o %s /home/lxy/instrument/DynamoRIO-Linux-9.0.1/bin64/drrun -- "
+# cmd_prefix = "taskset -c " + cpu + " perf stat -o %s "
+cmd_prefix = "taskset -c 8 perf stat -e cycles,instructions,L1-dcache-loads,L1-dcache-load-misses,r2012,dTLB-load-misses -o %s "
+# cmd_prefix = "/bin/qemu-aarch64 -plugin /home/lxy/bt/qemu-plugins_cpp/libbbv.so -d plugin -D %s "
 # cmd_prefix = ""
-title = "perf_drrun"
-log_dir = "/home/lxy/spec/%s_%s_%s_%s/" % (SPEC, SIZE, title, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
+
+title = "qemu_aarch_insn"
+log_dir_prefix = "/home/lxy/spec"
 
 #spec cpu diectory
-SPEC2000_DIR = "/home/lxy/SPEC/SPEC2000/lxy/spec2000_i386_x87_run"
-SPEC2006_DIR = "/home/lxy/SPEC/SPEC2006/lxy/spec2006_x64_sse2"
+SPEC2000_DIR = "/home/lxy/SPEC/SPEC2000/lxy/spec2000"
+SPEC2006_DIR = "/home/lxy/SPEC/SPEC2006/lxy/spec2006_x64"
 SPEC2006_EXT = "Ofast_static_x64"
-SPEC2017_DIR = "/home/lxy/SPEC/SPEC2017/cpu2017v118_x86_64_v1_run"
+SPEC2017_DIR = "/home/lxy/SPEC/SPEC2017/cpu2017v118_x64_gcc12_avx2"
 SPEC2017_EXT = "mytest"
+SPEC2017_EXT2 = "m64"
+
+
+# reset variable by options
+SPEC = get_args("spec", default=SPEC)
+SIZE = get_args("size", default=SIZE)
+cpu = get_args("cpu", default='0')
+
+log_dir = "%s/%s_%s_%s_%s" % (log_dir_prefix, title, SPEC, SIZE, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
 
 # DO NOT EDIT FOLLOWING
-# log_dir is uniq, need not clean
-# os.makedirs(log_dir, exist_ok=True)
-# shutil.rmtree(log_dir)
 os.makedirs(log_dir, exist_ok=True)
+
+if not THREADS:
+    # do not eat all the threads
+    THREADS = (os.cpu_count() - 4) // 2
 
 assert SIZE in ["test", "train", "ref"]
 if SPEC == "2000":
@@ -61,13 +85,27 @@ elif SPEC == "2017":
     # AAAAA
     SIZE = "refrate" if SIZE == "ref" else SIZE
     base_dir = SPEC2017_DIR + "/benchspec/CPU"
-    sub_dir = "run/run_%s_%s_%s-m64.0000" % (TUNE, SIZE, SPEC2017_EXT)
+    sub_dir = "run/run_%s_%s_%s-%s.0000" % (TUNE, SIZE, SPEC2017_EXT, SPEC2017_EXT2)
 
     speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C"]
     CINT = ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "548.exchange2_r", "557.xz_r"]
     CFP = ["503.bwaves_r", "507.cactuBSSN_r", "508.namd_r", "510.parest_r", "511.povray_r", "519.lbm_r", "521.wrf_r", "526.blender_r", "527.cam4_r", "538.imagick_r", "544.nab_r", "549.fotonik3d_r", "554.roms_r"]
 else:
+    print(f"{SPEC} not exsited")
     exit(1)
+
+if "perf" in cmd_prefix or "pin" in cmd_prefix:
+    cmd = (cmd_prefix % ("/dev/null")) + " /bin/ls 1>/dev/null 2>/dev/null"
+    if os.system(cmd):
+        print("can not run prefix")
+        print(cmd)
+        exit(1)
+
+if not os.path.exists(base_dir) :
+    print(f"{base_dir} not existed")
+    exit(1)
+
+score_file = open(log_dir + ".csv", "w")
 
 def get_reftime(reftime_filename, benchmark):
     f = open(reftime_filename)
@@ -127,20 +165,25 @@ def get_command(benchmark, speccmds_filename):
         elif not cmd_prefix :
             cmd_full_prefix = ""
         else :
-            cmd_full_prefix = cmd_prefix + " -- "
+            cmd_full_prefix = cmd_prefix + " "
         cmd = " ".join([cmd_full_prefix, cmd, ("<"+stdin) if stdin else "", ("1>" +stdout) if stdout else "", ("2>" + stderr) if stderr else ""])
         cmds.append(cmd)
     # print(cmds)
     return cmds
 
-def run_single(benchmark):
+def run_single(benchmark, get_cmd_only=False):
     DIR_PREFIX = ""
     if SPEC == "2000" :
         DIR_PREFIX = 'CINT2000' if benchmark in CINT else 'CFP2000'
     work_dir = os.path.join(base_dir, DIR_PREFIX,  benchmark, sub_dir)
-    reftime = get_reftime(os.path.join(base_dir, DIR_PREFIX, benchmark, "data/%s/reftime" % (SIZE)), benchmark)
+    if not os.path.exists(work_dir):
+        print(f"{work_dir} not existed")
+        exit(1)
     cmds = get_command(benchmark, os.path.join(work_dir, "speccmds.cmd"))
+    if get_cmd_only :
+        return ["cd %s && %s" % (work_dir, cmd) for cmd in cmds]
 
+    reftime = get_reftime(os.path.join(base_dir, DIR_PREFIX, benchmark, "data/%s/reftime" % (SIZE)), benchmark)
     os.chdir(work_dir)
     begin = time.time()
     for cmd in cmds:
@@ -157,45 +200,59 @@ def run_single(benchmark):
     runtime = end - begin
     return reftime, runtime, reftime / runtime
 
+def cd_exec(work_dir, cmd):
+    os.chdir(work_dir)
+    return os.system(cmd)
+
 def RUN(benchmarks):
     scores = []
-    for i in benchmarks:
-        reftime, runtime, ratio = run_single(i)
+    for benchmark in benchmarks:
+        reftime, runtime, ratio = run_single(benchmark)
         if not print_cmd_only:
-            print("%20s\t%.1f\t%.3f\t%.3f" % (i, reftime, runtime, ratio))
+            print("%20s\t%.1f\t%.3f\t%.3f" % (benchmark, reftime, runtime, ratio))
+            score_file.write('%s,%f,%f,%f\n' % (benchmark, reftime, runtime, ratio))
         scores.append(ratio)
     if not print_cmd_only:
-        print("score : %.3f" % reduce(lambda x, y: x*y, scores)**(1.0/len(scores)))
+        geo_mean = reduce(lambda x, y: x*y, scores)**(1.0/len(scores))
+        print("score : %.3f" % geo_mean)
+        score_file.write("score,,,%s\n" % geo_mean)
 
 
-def RUN_MT(benchmarks):
-    scores = []
-    global THREADS
-    if not THREADS:
-        # do not eat all the threads
-        THREADS = (os.cpu_count() - 4) // 2
+# def RUN_MT(benchmarks):
+#     scores = []
+#     with Pool(THREADS) as p:
+#         r = p.map(run_single, benchmarks)
+#         for index in range(len(benchmarks)):
+#             reftime, runtime, ratio = r[index]
+#             if not print_cmd_only:
+#                 print("%20s\t%.1f\t%.3f\t%.3f" % (benchmarks[index], reftime, runtime, ratio))
+#             scores.append(ratio)
+#     if not print_cmd_only:
+#         print("score : %.3f" % reduce(lambda x, y: x*y, scores)**(1.0/len(scores)))
+
+def RUN_MT2(benchmarks):
+    cmds = []
+    for i in benchmarks:
+        cmds += run_single(i, True)
     with Pool(THREADS) as p:
-        r = p.map(run_single, benchmarks)
-        for index in range(len(benchmarks)):
-            reftime, runtime, ratio = r[index]
-            if not print_cmd_only:
-                print("%20s\t%.1f\t%.3f\t%.3f" % (benchmarks[index], reftime, runtime, ratio))
-            scores.append(ratio)
-    if not print_cmd_only:
-        print("score : %.3f" % reduce(lambda x, y: x*y, scores)**(1.0/len(scores)))
+        r = p.map(os.system, cmds)
+        for index in range(len(cmds)):
+            print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
+            print(cmds[index].split("&&")[1])
 
 if not print_cmd_only:
     print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
-# if THREADS == 1:
-#     RUN(CINT)
-#     RUN(CFP)
-# else:
-#     RUN_MT(CINT)
-#     RUN_MT(CFP)
+if THREADS == 1:
+    RUN(CINT)
+    RUN(CFP)
+else:
+    RUN_MT2(CINT + CFP)
+    # RUN_MT(CINT)
+    # RUN_MT(CFP)
 
-RUN(CINT)
-RUN(CFP)
 
 if not print_cmd_only:
     print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+
+score_file.close()
