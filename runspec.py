@@ -2,58 +2,70 @@
 import os
 import sys
 import time
+import argparse
 from datetime import datetime
 from functools import reduce
 from multiprocessing import Pool
 # import shutil
-# import resource
-# resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+import resource
 
-ARGS = {}
-for arg in sys.argv[1:]:
-    s = arg.split(':')
-    key = s[0].strip()
-    value = s[1].strip()
-    ARGS[key] = value
-def get_args(key, default=None):
-    return ARGS[key] if key in ARGS else default
-if ARGS:
-    print(ARGS)
+parser = argparse.ArgumentParser(description = 'Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance')
+parser.add_argument('-i', '--size', default="test", choices=['test', 'train', 'ref', 'refrate'])
+parser.add_argument('-s', '--spec', default="2006", choices=['2000', '2006', '2017'])
+parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
+parser.add_argument('-b', '--benchmark', default="all")
+parser.add_argument('-t', '--threads', default=1, type=int)
+parser.add_argument('-l', '--loose', action='store_true')
+parser.add_argument('-p', '--print_cmd_only', action='store_true')
+parser.add_argument('-c', '--cmd_prefix', default='')
+parser.add_argument('--title', default="test_title")
+parser.add_argument('--log_dir_prefix', default=os.path.expanduser('~') + '/spec')
+parser.add_argument('--dir00', default="/home/lxy/SPEC/SPEC2000/lxy/spec2000")
+parser.add_argument('--dir06', default="/home/lxy/SPEC/SPEC2006/lxy/spec2006_x64_sse2")
+parser.add_argument('--dir17', default="/home/lxy/SPEC/SPEC2017/cpu2017v118_x64")
+parser.add_argument('--ext06', default="Ofast_static_x64")
+parser.add_argument('--ext17', default="x64.Ofast.sse2")
+parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
+args = parser.parse_args()
+
+print(args)
+
+slimit = args.slimit
+if slimit == 0:
+    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+elif slimit > 0:
+    slimit <<= 20
+    resource.setrlimit(resource.RLIMIT_STACK, (slimit, slimit))
+
+
 
 # runspec config
-SPEC = "2000" # "2000"/"2006"/"2017"
-SIZE = "ref"  # "test"/"train"/"ref"
+SPEC = args.spec
+SIZE = args.size
 # only 2017
-TUNE = "base" # "base"/"peak"
+TUNE = args.tune # "base"/"peak"
 # 0: max, 1: single_thread, other: other
-THREADS = 1
-ignore_error = False
-print_cmd_only = False
+THREADS = args.threads
+ignore_error = args.loose
+print_cmd_only = args.print_cmd_only
 
 # prefix config
 # cmd_prefix = "/home/lxy/instrument/pin-3.24/pin -t /home/lxy/instrument/x86_indirect_branch_analysis/TraceInsImm/obj-intel64/TraceInsImm.so -o %s -- "
 # cmd_prefix = "/home/lxy/bt/qemu-6.2.0/build/qemu-x86_64 "
 # cmd_prefix = "taskset -c " + cpu + " perf stat -o %s "
-cmd_prefix = "taskset -c 8 perf stat -e cycles,instructions,L1-dcache-loads,L1-dcache-load-misses,r2012,dTLB-load-misses -o %s "
+# cmd_prefix = "taskset -c 8 perf stat -e cycles,instructions,L1-dcache-loads,L1-dcache-load-misses,r2012,dTLB-load-misses -o %s "
 # cmd_prefix = "/bin/qemu-aarch64 -plugin /home/lxy/bt/qemu-plugins_cpp/libbbv.so -d plugin -D %s "
-# cmd_prefix = ""
+cmd_prefix = args.cmd_prefix
 
-title = "qemu_aarch_insn"
-log_dir_prefix = "/home/lxy/spec"
+title = args.title
+log_dir_prefix = args.log_dir_prefix
 
 #spec cpu diectory
-SPEC2000_DIR = "/home/lxy/SPEC/SPEC2000/lxy/spec2000"
-SPEC2006_DIR = "/home/lxy/SPEC/SPEC2006/lxy/spec2006_x64"
-SPEC2006_EXT = "Ofast_static_x64"
-SPEC2017_DIR = "/home/lxy/SPEC/SPEC2017/cpu2017v118_x64_gcc12_avx2"
-SPEC2017_EXT = "mytest"
-SPEC2017_EXT2 = "m64"
-
-
-# reset variable by options
-SPEC = get_args("spec", default=SPEC)
-SIZE = get_args("size", default=SIZE)
-cpu = get_args("cpu", default='0')
+SPEC2000_DIR = args.dir00
+SPEC2006_DIR = args.dir06
+SPEC2006_EXT = args.ext06
+SPEC2017_DIR = args.dir17
+SPEC2017_EXT = args.ext17
 
 log_dir = "%s/%s_%s_%s_%s" % (log_dir_prefix, title, SPEC, SIZE, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
 
@@ -64,7 +76,6 @@ if not THREADS:
     # do not eat all the threads
     THREADS = (os.cpu_count() - 4) // 2
 
-assert SIZE in ["test", "train", "ref"]
 if SPEC == "2000":
     # AAAAA
     base_dir = SPEC2000_DIR+ "/benchspec"
@@ -85,7 +96,7 @@ elif SPEC == "2017":
     # AAAAA
     SIZE = "refrate" if SIZE == "ref" else SIZE
     base_dir = SPEC2017_DIR + "/benchspec/CPU"
-    sub_dir = "run/run_%s_%s_%s-%s.0000" % (TUNE, SIZE, SPEC2017_EXT, SPEC2017_EXT2)
+    sub_dir = "run/run_%s_%s_%s.0000" % (TUNE, SIZE, SPEC2017_EXT)
 
     speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C"]
     CINT = ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "548.exchange2_r", "557.xz_r"]
@@ -240,17 +251,39 @@ def RUN_MT2(benchmarks):
             print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
             print(cmds[index].split("&&")[1])
 
+print(log_dir)
+
 if not print_cmd_only:
     print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
-if THREADS == 1:
-    RUN(CINT)
-    RUN(CFP)
-else:
-    RUN_MT2(CINT + CFP)
-    # RUN_MT(CINT)
-    # RUN_MT(CFP)
+def canonical_list(raw_name, canonical_name):
+    r = []
+    for raw in raw_name:
+        for item in canonical_name:
+            if raw in item:
+                r.append(item)
+    return r
 
+benchmark = args.benchmark.split(",")
+b_int = canonical_list(benchmark, CINT)
+b_fp = canonical_list(benchmark, CFP)
+
+if THREADS == 1:
+    if "int" in benchmark or "all" in benchmark:
+        RUN(CINT)
+    if "fp" in benchmark or "all" in benchmark:
+        RUN(CFP)
+    if b_int:
+        RUN(b_int)
+    if b_fp:
+        RUN(b_fp)
+else:
+    if "int" in benchmark:
+        RUN(CINT)
+    if "fp" in benchmark:
+        RUN(CFP)
+    if "all" in benchmark:
+        RUN_MT2(CINT + CFP)
 
 if not print_cmd_only:
     print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
