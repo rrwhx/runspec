@@ -279,9 +279,9 @@ if THREADS == 1:
         RUN(b_fp)
 else:
     if "int" in benchmark:
-        RUN(CINT)
+        RUN_MT2(CINT)
     if "fp" in benchmark:
-        RUN(CFP)
+        RUN_MT2(CFP)
     if "all" in benchmark:
         RUN_MT2(CINT + CFP)
 
