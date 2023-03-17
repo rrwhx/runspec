@@ -9,22 +9,26 @@ from multiprocessing import Pool
 # import shutil
 import resource
 
-parser = argparse.ArgumentParser(description = 'Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance')
+parser = argparse.ArgumentParser(description =
+"""Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,
+Spec run directory should be prepared carefully,
+Run test, train and ref in spec directory(00), or just -a setup(06,17), """, formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('-i', '--size', default="test", choices=['test', 'train', 'ref', 'refrate'])
 parser.add_argument('-s', '--spec', default="2006", choices=['2000', '2006', '2017'])
 parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
-parser.add_argument('-b', '--benchmark', default="all")
-parser.add_argument('-t', '--threads', default=1, type=int)
-parser.add_argument('-l', '--loose', action='store_true')
-parser.add_argument('-p', '--print_cmd_only', action='store_true')
-parser.add_argument('-c', '--cmd_prefix', default='')
+parser.add_argument('-b', '--benchmark', default="all", help="benchmark selection, all/int/fp, comma separated items")
+parser.add_argument('--ext06', default="none")
+parser.add_argument('--ext17', default="none")
+parser.add_argument('-t', '--threads', default=1, type=int, help="Allow N jobs at once;")
+parser.add_argument('-l', '--loose', action='store_true', help="ignore errors")
+parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually run any cmd; just print them.")
+parser.add_argument('-v', '--verbose', action='store_true', help="Print cmd before exec cmd")
+parser.add_argument('-c', '--cmd_prefix', default='', help=r'cmd prefix before real cmd, %%s for output, eg: -c "perf stat -o %%s "')
 parser.add_argument('--title', default="test_title")
-parser.add_argument('--log_dir_prefix', default=os.path.expanduser('~') + '/spec')
+parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_result', help="location of cmd_prefix logs, defaults to ~/runspec_result")
 parser.add_argument('--dir00', default=".")
 parser.add_argument('--dir06', default=".")
 parser.add_argument('--dir17', default=".")
-parser.add_argument('--ext06', default="none")
-parser.add_argument('--ext17', default="none")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
@@ -47,7 +51,8 @@ TUNE = args.tune # "base"/"peak"
 # 0: max, 1: single_thread, other: other
 THREADS = args.threads
 ignore_error = args.loose
-print_cmd_only = args.print_cmd_only
+dry_run = args.dry_run
+verbose = args.verbose
 
 # prefix config
 # cmd_prefix = "/home/lxy/instrument/pin-3.24/pin -t /home/lxy/instrument/x86_indirect_branch_analysis/TraceInsImm/obj-intel64/TraceInsImm.so -o %s -- "
@@ -58,7 +63,7 @@ print_cmd_only = args.print_cmd_only
 cmd_prefix = args.cmd_prefix
 
 title = args.title
-log_dir_prefix = args.log_dir_prefix
+result_dir = args.result_dir
 
 #spec cpu diectory
 SPEC2000_DIR = os.path.abspath(args.dir00)
@@ -67,7 +72,7 @@ SPEC2006_EXT = args.ext06
 SPEC2017_DIR = os.path.abspath(args.dir17)
 SPEC2017_EXT = args.ext17
 
-log_dir = "%s/%s_%s_%s_%s" % (log_dir_prefix, title, SPEC, SIZE, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
+log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
 
 print("log dir is %s" % log_dir)
 
@@ -174,7 +179,7 @@ def get_command(benchmark, speccmds_filename):
                     break
         # print(stdin, stdout, stderr, cmd)
         if "%s" in cmd_prefix:
-            cmd_full_prefix = cmd_prefix % (log_dir + "/" + benchmark + str(index))
+            cmd_full_prefix = cmd_prefix % (log_dir + "/" + benchmark + "_" + str(index))
         elif not cmd_prefix :
             cmd_full_prefix = ""
         else :
@@ -200,10 +205,10 @@ def run_single(benchmark, get_cmd_only=False):
     os.chdir(work_dir)
     begin = time.time()
     for cmd in cmds:
-        if print_cmd_only:
+        if dry_run or verbose:
             print("cd %s && %s" % (work_dir, cmd))
 
-        if not print_cmd_only:
+        if not dry_run:
             r = os.system(cmd)
             if r:
                 print("error %s, return value:%d" % (benchmark, r))
@@ -223,11 +228,11 @@ def RUN(benchmarks):
     scores = []
     for benchmark in benchmarks:
         reftime, runtime, ratio = run_single(benchmark)
-        if not print_cmd_only:
+        if not dry_run:
             print("%20s\t%.1f\t%.3f\t%.3f" % (benchmark, reftime, runtime, ratio))
             score_file.write('%s,%f,%f,%f\n' % (benchmark, reftime, runtime, ratio))
         scores.append(ratio)
-    if not print_cmd_only:
+    if not dry_run:
         geo_mean = reduce(lambda x, y: x*y, scores)**(1.0/len(scores))
         print("score : %.3f" % geo_mean)
         score_file.write("score,,,%s\n" % geo_mean)
@@ -239,10 +244,10 @@ def RUN(benchmarks):
 #         r = p.map(run_single, benchmarks)
 #         for index in range(len(benchmarks)):
 #             reftime, runtime, ratio = r[index]
-#             if not print_cmd_only:
+#             if not dry_run:
 #                 print("%20s\t%.1f\t%.3f\t%.3f" % (benchmarks[index], reftime, runtime, ratio))
 #             scores.append(ratio)
-#     if not print_cmd_only:
+#     if not dry_run:
 #         print("score : %.3f" % reduce(lambda x, y: x*y, scores)**(1.0/len(scores)))
 
 def RUN_MT2(benchmarks):
@@ -255,7 +260,7 @@ def RUN_MT2(benchmarks):
             print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
             print(cmds[index].split("&&")[1])
 
-if not print_cmd_only:
+if not dry_run:
     print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
 def canonical_list(raw_name, canonical_name):
@@ -287,7 +292,7 @@ else:
     if "all" in benchmark:
         RUN_MT2(CINT + CFP)
 
-if not print_cmd_only:
+if not dry_run:
     print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
 score_file.close()
