@@ -206,7 +206,9 @@ def run_single(benchmark, get_cmd_only=False):
         if not print_cmd_only:
             r = os.system(cmd)
             if r:
-                print("error %s %d" % (benchmark, r))
+                print("error %s, return value:%d" % (benchmark, r))
+                print("work_dir %s" % (work_dir))
+                print("cmd %s" % (cmd))
                 if not ignore_error :
                     exit(r)
     end = time.time()
