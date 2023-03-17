@@ -20,11 +20,11 @@ parser.add_argument('-p', '--print_cmd_only', action='store_true')
 parser.add_argument('-c', '--cmd_prefix', default='')
 parser.add_argument('--title', default="test_title")
 parser.add_argument('--log_dir_prefix', default=os.path.expanduser('~') + '/spec')
-parser.add_argument('--dir00', default="/home/lxy/SPEC/SPEC2000/lxy/spec2000")
-parser.add_argument('--dir06', default="/home/lxy/SPEC/SPEC2006/lxy/spec2006_x64_sse2")
-parser.add_argument('--dir17', default="/home/lxy/SPEC/SPEC2017/cpu2017v118_x64")
-parser.add_argument('--ext06', default="Ofast_static_x64")
-parser.add_argument('--ext17', default="x64.Ofast.sse2")
+parser.add_argument('--dir00', default=".")
+parser.add_argument('--dir06', default=".")
+parser.add_argument('--dir17', default=".")
+parser.add_argument('--ext06', default="none")
+parser.add_argument('--ext17', default="none")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
@@ -61,13 +61,15 @@ title = args.title
 log_dir_prefix = args.log_dir_prefix
 
 #spec cpu diectory
-SPEC2000_DIR = args.dir00
-SPEC2006_DIR = args.dir06
+SPEC2000_DIR = os.path.abspath(args.dir00)
+SPEC2006_DIR = os.path.abspath(args.dir06)
 SPEC2006_EXT = args.ext06
-SPEC2017_DIR = args.dir17
+SPEC2017_DIR = os.path.abspath(args.dir17)
 SPEC2017_EXT = args.ext17
 
 log_dir = "%s/%s_%s_%s_%s" % (log_dir_prefix, title, SPEC, SIZE, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
+
+print("log dir is %s" % log_dir)
 
 # DO NOT EDIT FOLLOWING
 os.makedirs(log_dir, exist_ok=True)
@@ -250,8 +252,6 @@ def RUN_MT2(benchmarks):
         for index in range(len(cmds)):
             print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
             print(cmds[index].split("&&")[1])
-
-print(log_dir)
 
 if not print_cmd_only:
     print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
