@@ -107,12 +107,12 @@ else:
     print(f"{SPEC} not exsited")
     exit(1)
 
-if "perf" in cmd_prefix or "pin" in cmd_prefix:
-    cmd = (cmd_prefix % ("/dev/null")) + " /bin/ls 1>/dev/null 2>/dev/null"
-    if os.system(cmd):
-        print("can not run prefix")
-        print(cmd)
-        exit(1)
+# if "perf" in cmd_prefix or "pin" in cmd_prefix:
+#     cmd = (cmd_prefix % ("/dev/null")) + " /bin/ls 1>/dev/null 2>/dev/null"
+#     if os.system(cmd):
+#         print("can not run prefix")
+#         print(cmd)
+#         exit(1)
 
 if not os.path.exists(base_dir) :
     print(f"{base_dir} not existed")
