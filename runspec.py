@@ -25,6 +25,7 @@ parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually
 parser.add_argument('-v', '--verbose', action='store_true', help="Print cmd before exec cmd")
 parser.add_argument('-c', '--cmd_prefix', default='', help=r'cmd prefix before real cmd, %%s for output, eg: -c "perf stat -o %%s "')
 parser.add_argument('--title', default="test_title")
+parser.add_argument('--stamp', default="time")
 parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_result', help="location of cmd_prefix logs, defaults to ~/runspec_result")
 parser.add_argument('--dir00', default=".")
 parser.add_argument('--dir06', default=".")
@@ -76,7 +77,8 @@ SPEC2006_EXT = args.ext06
 SPEC2017_DIR = os.path.abspath(args.dir17)
 SPEC2017_EXT = args.ext17
 
-log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
+stamp   = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if args.stamp == 'time' else args.stamp
+log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
 
 print("log dir is %s" % log_dir)
 
