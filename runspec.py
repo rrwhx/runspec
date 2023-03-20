@@ -54,6 +54,10 @@ ignore_error = args.loose
 dry_run = args.dry_run
 verbose = args.verbose
 
+# print cmd by order
+if dry_run:
+    THREADS = 1
+
 # prefix config
 # cmd_prefix = "/home/lxy/instrument/pin-3.24/pin -t /home/lxy/instrument/x86_indirect_branch_analysis/TraceInsImm/obj-intel64/TraceInsImm.so -o %s -- "
 # cmd_prefix = "/home/lxy/bt/qemu-6.2.0/build/qemu-x86_64 "
