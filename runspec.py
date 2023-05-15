@@ -33,7 +33,7 @@ parser.add_argument('--dir17', default=".")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
-print(args)
+print(args,file=sys.stderr)
 
 slimit = args.slimit
 if slimit == 0:
@@ -80,7 +80,7 @@ SPEC2017_EXT = args.ext17
 stamp   = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if args.stamp == 'time' else args.stamp
 log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
 
-print("log dir is %s" % log_dir)
+print("log dir is %s" % log_dir,file=sys.stderr)
 
 # DO NOT EDIT FOLLOWING
 os.makedirs(log_dir, exist_ok=True)
