@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import argparse
+import glob
 from datetime import datetime
 from functools import reduce
 from multiprocessing import Pool
@@ -14,11 +15,9 @@ parser = argparse.ArgumentParser(description =
 Spec run directory should be prepared carefully,
 Run test, train and ref in spec directory(00), or just -a setup(06,17), """, formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('-i', '--size', default="test", choices=['test', 'train', 'ref', 'refrate'])
-parser.add_argument('-s', '--spec', default="2006", choices=['2000', '2006', '2017'])
-parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
 parser.add_argument('-b', '--benchmark', default="all", help="benchmark selection, all/int/fp, comma separated items")
-parser.add_argument('--ext06', default="none")
-parser.add_argument('--ext17', default="none")
+parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
+parser.add_argument('--ext', default="", help="auto probe, need not set")
 parser.add_argument('-t', '--threads', default=1, type=int, help="Allow N jobs at once;")
 parser.add_argument('-l', '--loose', action='store_true', help="ignore errors")
 parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually run any cmd; just print them.")
@@ -27,9 +26,7 @@ parser.add_argument('-c', '--cmd_prefix', default='', help=r'cmd prefix before r
 parser.add_argument('--title', default="test_title")
 parser.add_argument('--stamp', default="time")
 parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_result', help="location of cmd_prefix logs, defaults to ~/runspec_result")
-parser.add_argument('--dir00', default=".")
-parser.add_argument('--dir06', default=".")
-parser.add_argument('--dir17', default=".")
+parser.add_argument('--dir', default=".")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
@@ -45,7 +42,6 @@ elif slimit > 0:
 
 
 # runspec config
-SPEC = args.spec
 SIZE = args.size
 # only 2017
 TUNE = args.tune # "base"/"peak"
@@ -71,11 +67,27 @@ title = args.title
 result_dir = args.result_dir
 
 #spec cpu diectory
-SPEC2000_DIR = os.path.abspath(args.dir00)
-SPEC2006_DIR = os.path.abspath(args.dir06)
-SPEC2006_EXT = args.ext06
-SPEC2017_DIR = os.path.abspath(args.dir17)
-SPEC2017_EXT = args.ext17
+SPEC_DIR = os.path.abspath(args.dir)
+EXE_EXT = args.ext
+if not EXE_EXT:
+    try:
+        exes = glob.glob(os.path.join(SPEC_DIR, "benchspec/*/*/run/*/perl*_base.*"))
+        exe_name = os.path.basename(exes[0])
+        EXE_EXT = exe_name[exe_name.find(".") + 1:]
+        # exe_name.split(base)
+    except Exception:
+        print("--ext was not specified, and auto probe failed")
+        exit(1)
+SPEC = ''
+if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CINT2000")):
+    SPEC = "2000"
+if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU2006")):
+    SPEC = "2006"
+if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU")):
+    SPEC = "2017"
+if not SPEC:
+    print("%s is not a spec cpu dir" % SPEC_DIR)
+    exit(1)
 
 stamp   = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if args.stamp == 'time' else args.stamp
 log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
@@ -91,7 +103,7 @@ if not THREADS:
 
 if SPEC == "2000":
     # AAAAA
-    base_dir = SPEC2000_DIR+ "/benchspec"
+    base_dir = SPEC_DIR+ "/benchspec"
     sub_dir = {"test": "run/00000001", "train":"run/00000002", "ref":"run/00000003"}[SIZE]
 
     speccmd_ignore_prefix = ["-u"]
@@ -99,8 +111,8 @@ if SPEC == "2000":
     CFP = ["168.wupwise", "171.swim", "172.mgrid", "173.applu", "177.mesa", "178.galgel", "179.art", "183.equake", "187.facerec", "188.ammp", "189.lucas", "191.fma3d", "200.sixtrack", "301.apsi"]
 elif SPEC == "2006":
     # AAAAA
-    base_dir = SPEC2006_DIR + "/benchspec/CPU2006"
-    sub_dir = "run/run_base_%s_%s.0000" % (SIZE, SPEC2006_EXT)
+    base_dir = SPEC_DIR + "/benchspec/CPU2006"
+    sub_dir = "run/run_base_%s_%s.0000" % (SIZE, EXE_EXT)
 
     speccmd_ignore_prefix = ["-C"]
     CINT = ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk", "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref", "471.omnetpp", "473.astar", "483.xalancbmk"]
@@ -108,8 +120,8 @@ elif SPEC == "2006":
 elif SPEC == "2017":
     # AAAAA
     SIZE = "refrate" if SIZE == "ref" else SIZE
-    base_dir = SPEC2017_DIR + "/benchspec/CPU"
-    sub_dir = "run/run_%s_%s_%s.0000" % (TUNE, SIZE, SPEC2017_EXT)
+    base_dir = SPEC_DIR + "/benchspec/CPU"
+    sub_dir = "run/run_%s_%s_%s.0000" % (TUNE, SIZE, EXE_EXT)
 
     speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C"]
     CINT = ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "548.exchange2_r", "557.xz_r"]

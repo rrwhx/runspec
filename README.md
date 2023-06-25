@@ -42,8 +42,8 @@ runspec -c x64.cfg -i ref   -n 1 -a setup intrate fprate
 ## 使用
 
 ```bash
-usage: runspec.py [-h] [-i {test,train,ref,refrate}] [-s {2000,2006,2017}] [-T {base,peak}] [-b BENCHMARK] [--ext06 EXT06] [--ext17 EXT17] [-t THREADS] [-l] [-n] [-v] [-c CMD_PREFIX] [--title TITLE]
-                  [--stamp STAMP] [--result_dir RESULT_DIR] [--dir00 DIR00] [--dir06 DIR06] [--dir17 DIR17] [--slimit SLIMIT]
+usage: runspec.py [-h] [-i {test,train,ref,refrate}] [-b BENCHMARK] [-T {base,peak}] [--ext EXT] [-t THREADS] [-l] [-n] [-v] [-c CMD_PREFIX] [--title TITLE] [--stamp STAMP]
+                  [--result_dir RESULT_DIR] [--dir DIR] [--slimit SLIMIT]
 
 Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,
 Spec run directory should be prepared carefully,
@@ -52,12 +52,10 @@ Run test, train and ref in spec directory(00), or just -a setup(06,17),
 options:
   -h, --help            show this help message and exit
   -i {test,train,ref,refrate}, --size {test,train,ref,refrate}
-  -s {2000,2006,2017}, --spec {2000,2006,2017}
-  -T {base,peak}, --tune {base,peak}
   -b BENCHMARK, --benchmark BENCHMARK
                         benchmark selection, all/int/fp, comma separated items
-  --ext06 EXT06
-  --ext17 EXT17
+  -T {base,peak}, --tune {base,peak}
+  --ext EXT             auto probe, need not set
   -t THREADS, --threads THREADS
                         Allow N jobs at once;
   -l, --loose           ignore errors
@@ -69,9 +67,7 @@ options:
   --stamp STAMP
   --result_dir RESULT_DIR
                         location of cmd_prefix logs, defaults to ~/runspec_result
-  --dir00 DIR00
-  --dir06 DIR06
-  --dir17 DIR17
+  --dir DIR
   --slimit SLIMIT       The limit of the stack size, 0 ulimited, or a number(MB), default: not modified
 ```
 
