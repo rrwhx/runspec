@@ -78,14 +78,13 @@ if not EXE_EXT:
     except Exception:
         print("--ext was not specified, and auto probe failed")
         exit(1)
-SPEC = ''
 if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CINT2000")):
     SPEC = "2000"
-if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU2006")):
+elif os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU2006")):
     SPEC = "2006"
-if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU")):
+elif os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU")):
     SPEC = "2017"
-if not SPEC:
+else:
     print("%s is not a spec cpu dir" % SPEC_DIR)
     exit(1)
 
