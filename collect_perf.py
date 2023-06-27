@@ -19,6 +19,7 @@ print(event_list)
 
 
 dir_list = os.listdir(result_dir)
+dir_list = [f for f in dir_list if not f.startswith('.')]
 dir_list.sort()
 print(dir_list)
 data_dict = {}
