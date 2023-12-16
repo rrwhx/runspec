@@ -22,6 +22,7 @@ parser.add_argument('-t', '--threads', default=1, type=int, help="Allow N jobs a
 parser.add_argument('-l', '--loose', action='store_true', help="ignore errors")
 parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually run any cmd; just print them.")
 parser.add_argument('-v', '--verbose', action='store_true', help="Print cmd before exec cmd")
+parser.add_argument('--intfp', action='store_true', help="intfp prefix")
 parser.add_argument('-c', '--cmd_prefix', default='', help=r'cmd prefix before real cmd, %%s for output, eg: -c "perf stat -o %%s "')
 parser.add_argument('--title', default="test_title")
 parser.add_argument('--stamp', default="time")
@@ -168,26 +169,26 @@ def get_command(benchmark, speccmds_filename):
         if ignore:
             continue
         index += 1
-        args = line[:-1].split(" ")
-        # print(args)
+        cmd_args = line[:-1].split(" ")
+        # print(cmd_args)
         i = 0
         stdin = ""
         stdout = ""
         stderr = ""
-        while i < len(args) :
-            if args[i] == "-i":
-                stdin = args[i + 1]
+        while i < len(cmd_args) :
+            if cmd_args[i] == "-i":
+                stdin = cmd_args[i + 1]
                 i += 1
-            elif args[i] == "-o":
-                stdout = args[i + 1]
+            elif cmd_args[i] == "-o":
+                stdout = cmd_args[i + 1]
                 i += 1
-            elif args[i] == "-e":
-                stderr = args[i + 1]
+            elif cmd_args[i] == "-e":
+                stderr = cmd_args[i + 1]
                 i += 1
             else :
                 break
             i += 1
-        cmd = " ".join(args[i:])
+        cmd = " ".join(cmd_args[i:])
         if SPEC == "2017":
             for i in range(0, len(cmd)):
                 # 2017 append < in > stdout 2>> stderr at end of command
@@ -196,7 +197,10 @@ def get_command(benchmark, speccmds_filename):
                     break
         # print(stdin, stdout, stderr, cmd)
         if "%s" in cmd_prefix:
-            cmd_full_prefix = cmd_prefix % (log_dir + "/" + benchmark + "_" + str(index))
+            intfp = ""
+            if args.intfp:
+                intfp = "int_" if benchmark in CINT else "fp_"
+            cmd_full_prefix = cmd_prefix % (log_dir + "/" + intfp + benchmark + "_" + str(index))
         elif not cmd_prefix :
             cmd_full_prefix = ""
         else :
