@@ -18,6 +18,7 @@ parser.add_argument('-i', '--size', default="test", choices=['test', 'train', 'r
 parser.add_argument('-b', '--benchmark', default="all", help="benchmark selection, all/int/fp, comma separated items")
 parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
 parser.add_argument('--ext', default="", help="auto probe, need not set")
+parser.add_argument('--suffix', default="", help="suffix of output file")
 parser.add_argument('-t', '--threads', default=1, type=int, help="Allow N jobs at once;")
 parser.add_argument('-l', '--loose', action='store_true', help="ignore errors")
 parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually run any cmd; just print them.")
@@ -95,7 +96,8 @@ log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
 print("log dir is %s" % log_dir,file=sys.stderr)
 
 # DO NOT EDIT FOLLOWING
-os.makedirs(log_dir, exist_ok=True)
+if not dry_run:
+    os.makedirs(log_dir, exist_ok=True)
 
 if not THREADS:
     # do not eat all the threads
@@ -200,7 +202,7 @@ def get_command(benchmark, speccmds_filename):
             intfp = ""
             if args.intfp:
                 intfp = "int_" if benchmark in CINT else "fp_"
-            cmd_full_prefix = cmd_prefix % (log_dir + "/" + intfp + benchmark + "_" + str(index))
+            cmd_full_prefix = cmd_prefix % (log_dir + "/" + intfp + benchmark + "_" + str(index) + args.suffix)
         elif not cmd_prefix :
             cmd_full_prefix = ""
         else :
