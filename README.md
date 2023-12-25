@@ -42,8 +42,8 @@ runspec -c x64.cfg -i ref   -n 1 -a setup intrate fprate
 ## 使用
 
 ```bash
-usage: runspec.py [-h] [-i {test,train,ref,refrate}] [-b BENCHMARK] [-T {base,peak}] [--ext EXT] [-t THREADS] [-l] [-n] [-v] [-c CMD_PREFIX] [--title TITLE] [--stamp STAMP]
-                  [--result_dir RESULT_DIR] [--dir DIR] [--slimit SLIMIT]
+usage: runspec.py [-h] [-i {test,train,ref,refrate}] [-b BENCHMARK] [-T {base,peak}] [--ext EXT] [--suffix SUFFIX] [-t THREADS] [-l] [-n] [-v] [--intfp] [-c CMD_PREFIX] [--title TITLE]
+                  [--stamp STAMP] [--result_dir RESULT_DIR] [--dir DIR] [--slimit SLIMIT]
 
 Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,
 Spec run directory should be prepared carefully,
@@ -56,11 +56,13 @@ options:
                         benchmark selection, all/int/fp, comma separated items
   -T {base,peak}, --tune {base,peak}
   --ext EXT             auto probe, need not set
+  --suffix SUFFIX       suffix of output file
   -t THREADS, --threads THREADS
                         Allow N jobs at once;
   -l, --loose           ignore errors
   -n, --dry_run         Don't actually run any cmd; just print them.
   -v, --verbose         Print cmd before exec cmd
+  --intfp               intfp prefix
   -c CMD_PREFIX, --cmd_prefix CMD_PREFIX
                         cmd prefix before real cmd, %s for output, eg: -c "perf stat -o %s "
   --title TITLE
@@ -75,8 +77,8 @@ options:
 
 ```bash
 ./runspec.py -i ref -s 2006 -b all -t 4 \
-    --dir06 /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/ \
-    --ext06 Ofast_static_x64 -c "/usr/bin/time -f %%M -o %s " \
+    --dir /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/ \
+    -c "/usr/bin/time -f %%M -o %s " \
     --title physical_memory_usage
 ```
 ```bash
