@@ -76,7 +76,7 @@ options:
 ### 示例
 
 ```bash
-./runspec.py -i ref -s 2006 -b all -t 4 \
+./runspec.py -i ref -b all -t 4 \
     --dir /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/ \
     -c "/usr/bin/time -f %%M -o %s " \
     --title physical_memory_usage
