@@ -21,45 +21,45 @@
 cd <spec_root>
 cp run.sh .
 cp setup_spec.sh .
-./setup_spec.sh <config>
+./setup_spec.sh <config_file>
 ```
 
 ### 方案 2
 
 - spec cpu2000
 ```bash
-source shrc
-relocate
 # build
-runspec -c x64.cfg -i test  -n 1 all -a build
+./run.sh <config_file> test 1 all
+# setup run
 rm -rf benchspec/*/*/run/
-runspec -c x64.cfg -i test  -n 1 all
-runspec -c x64.cfg -i train -n 1 all
-runspec -c x64.cfg -i ref   -n 1 all
+./run.sh <config_file> test  1 all
+./run.sh <config_file> train 1 all
+./run.sh <config_file> ref   1 all
 ```
 保证 run 目录下生成`00000001  00000002  00000003`分别对应`test train ref`
 
 - spec cpu2006
 ```bash
-source shrc
-relocate
+cd <spec_root>
 # build
-runspec -c x64.cfg -i test  -n 1 all -a build
+./run.sh <config_file> test 1 all
+# setup run
 rm -rf benchspec/CPU2006/*/run/
-runspec -c x64.cfg -i test  -n 1 all -a setup
-runspec -c x64.cfg -i train -n 1 all -a setup
-runspec -c x64.cfg -i ref   -n 1 all -a setup
+./run.sh <config_file> test  1 all -a setup
+./run.sh <config_file> train 1 all -a setup
+./run.sh <config_file> ref   1 all -a setup
 ```
 
 - spec cpu2017
 ```bash
 source shrc
 # build
-runspec -c x64.cfg -i test  -n 1 -a build intrate fprate -T base
+./run.sh <config_file> test 1 intrate fprate -T base
+# setup run
 rm -rf benchspec/CPU/*/run/
-runspec -c x64.cfg -i test  -n 1 -a setup intrate fprate -T base
-runspec -c x64.cfg -i train -n 1 -a setup intrate fprate -T base
-runspec -c x64.cfg -i ref   -n 1 -a setup intrate fprate -T base
+./run.sh <config_file> test  1 -T base -a setup specrate
+./run.sh <config_file> train 1 -T base -a setup specrate
+./run.sh <config_file> ref   1 -T base -a setup specrate
 ```
 
 ## 使用

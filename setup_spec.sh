@@ -27,6 +27,8 @@ fi
 
 echo $spec
 
+rm -rf benchspec/*/*/run/
+
 if [[ "$spec" == "2000" ]]
 then
     ./run.sh $1 test  1 all
@@ -48,6 +50,5 @@ rm -rf result/
 rm -rf tmp/
 rm -rf config/*cfg.*
 
-#rm -rf benchspec/*/*/run/
 rm -rf benchspec/*/*/build/
 
