@@ -22,6 +22,9 @@
 cd <spec_root>
 cp run.sh .
 cp setup_spec.sh .
+./run.sh <config_file> test 1 all
+# cpu 2017
+# ./run.sh <config_file> test 1 intrate fprate -T base
 ./setup_spec.sh <config_file>
 ```
 
