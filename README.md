@@ -14,8 +14,24 @@
 编译好的spec cpu目录
 
 ### 建立run目录
+
+### 方案 1
+
+```bash
+cd <spec_root>
+cp run.sh .
+cp setup_spec.sh .
+./setup_spec.sh <config>
+```
+
+### 方案 2
+
 - spec cpu2000
 ```bash
+source shrc
+relocate
+# build
+runspec -c x64.cfg -i test  -n 1 all -a build
 rm -rf benchspec/*/*/run/
 runspec -c x64.cfg -i test  -n 1 all
 runspec -c x64.cfg -i train -n 1 all
@@ -25,6 +41,10 @@ runspec -c x64.cfg -i ref   -n 1 all
 
 - spec cpu2006
 ```bash
+source shrc
+relocate
+# build
+runspec -c x64.cfg -i test  -n 1 all -a build
 rm -rf benchspec/CPU2006/*/run/
 runspec -c x64.cfg -i test  -n 1 all -a setup
 runspec -c x64.cfg -i train -n 1 all -a setup
@@ -33,10 +53,13 @@ runspec -c x64.cfg -i ref   -n 1 all -a setup
 
 - spec cpu2017
 ```bash
+source shrc
+# build
+runspec -c x64.cfg -i test  -n 1 -a build intrate fprate -T base
 rm -rf benchspec/CPU/*/run/
-runspec -c x64.cfg -i test  -n 1 -a setup intrate fprate
-runspec -c x64.cfg -i train -n 1 -a setup intrate fprate
-runspec -c x64.cfg -i ref   -n 1 -a setup intrate fprate
+runspec -c x64.cfg -i test  -n 1 -a setup intrate fprate -T base
+runspec -c x64.cfg -i train -n 1 -a setup intrate fprate -T base
+runspec -c x64.cfg -i ref   -n 1 -a setup intrate fprate -T base
 ```
 
 ## 使用
