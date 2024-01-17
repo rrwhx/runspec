@@ -17,6 +17,7 @@
 
 ### 方案 1
 
+保证 run 目录下生成三个文件夹分别对应`test train ref`
 ```bash
 cd <spec_root>
 cp run.sh .
@@ -27,6 +28,7 @@ cp setup_spec.sh .
 ### 方案 2
 
 - spec cpu2000
+保证 run 目录下生成`00000001  00000002  00000003`分别对应`test train ref`
 ```bash
 # build
 ./run.sh <config_file> test 1 all
@@ -36,9 +38,9 @@ rm -rf benchspec/*/*/run/
 ./run.sh <config_file> train 1 all
 ./run.sh <config_file> ref   1 all
 ```
-保证 run 目录下生成`00000001  00000002  00000003`分别对应`test train ref`
 
 - spec cpu2006
+保证 run 目录下生成`run_base_test_<config_file>.0000 run_base_train_<config_file>.0000 run_base_ref_<config_file>.0000`分别对应`test train ref`
 ```bash
 cd <spec_root>
 # build
@@ -51,6 +53,7 @@ rm -rf benchspec/CPU2006/*/run/
 ```
 
 - spec cpu2017
+保证 run 目录下生成`run_base_test_<config_file>.0000 run_base_train_<config_file>.0000 run_base_refrate_<config_file>.0000`分别对应`test train ref`
 ```bash
 source shrc
 # build
