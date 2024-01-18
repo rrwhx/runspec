@@ -104,12 +104,15 @@ options:
 
 ### 示例
 
+#### 收集每个子项使用的内存大小
+
 ```bash
 ./runspec.py -i ref -b all -t 4 \
     --dir /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/ \
-    -c "/usr/bin/time -f %%M -o %s " \
+    --cmd_prefix "/usr/bin/time -f %%M -o %s " \
     --title physical_memory_usage
 ```
+
 ```bash
 cd ~/runspec_result/physical_memory_usage_2006_ref_2023_04_24_09_36_48/
 grep -r . . | sort
@@ -126,6 +129,31 @@ grep -r . . | sort
 ./403.gcc_2:257476
 ./403.gcc_3:454100
 ...
+```
+
+#### 测量QEMU效率
+
+```bash
+./runspec.py -i ref -b int \
+    --dir /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/ \
+    --cmd_prefix "qemu-x86_64 -- " \
+    --title qemu_log
+```
+
+#### 测试原生性能
+
+```bash
+./runspec.py -i ref -b int \
+    --dir /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/
+```
+
+#### Perf record IPC
+
+```bash
+./runspec.py -i ref -b int \
+    --dir /2t/SPEC/SPEC2006/lxy/spec2006_x64_avx2/ \
+    --cmd_prefix "taskset -c 8 perf record -F 100 -e instructions -o %s --  " \
+    --title perf_record_instructions
 ```
 
 ### FAQ:
