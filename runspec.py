@@ -20,6 +20,7 @@ parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
 parser.add_argument('--ext', default="", help="auto probe, need not set")
 parser.add_argument('--suffix', default="", help="suffix of output file")
 parser.add_argument('-t', '--threads', default=1, type=int, help="Allow N jobs at once;")
+parser.add_argument('--redirect_stderr', action='store_true', help="redirect stderr to logfile.stderr")
 parser.add_argument('-l', '--loose', action='store_true', help="ignore errors")
 parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually run any cmd; just print them.")
 parser.add_argument('-v', '--verbose', action='store_true', help="Print cmd before exec cmd")
@@ -96,7 +97,7 @@ log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
 print("log dir is %s" % log_dir,file=sys.stderr)
 
 # DO NOT EDIT FOLLOWING
-if not dry_run:
+if not dry_run and "%s" in cmd_prefix:
     os.makedirs(log_dir, exist_ok=True)
 
 if not THREADS:
@@ -198,15 +199,18 @@ def get_command(benchmark, speccmds_filename):
                     cmd = cmd[:i]
                     break
         # print(stdin, stdout, stderr, cmd)
+        intfp = ""
+        if args.intfp:
+            intfp = "int_" if benchmark in CINT else "fp_"
+        logfile = log_dir + "/" + intfp + benchmark + "_" + str(index) + args.suffix
         if "%s" in cmd_prefix:
-            intfp = ""
-            if args.intfp:
-                intfp = "int_" if benchmark in CINT else "fp_"
-            cmd_full_prefix = cmd_prefix % (log_dir + "/" + intfp + benchmark + "_" + str(index) + args.suffix)
+            cmd_full_prefix = cmd_prefix % logfile
         elif not cmd_prefix :
             cmd_full_prefix = ""
         else :
             cmd_full_prefix = cmd_prefix + " "
+        if args.redirect_stderr:
+            stderr = logfile + ".stderr"
         cmd = " ".join([cmd_full_prefix, cmd, ("<"+stdin) if stdin else "", ("1>" +stdout) if stdout else "", ("2>" + stderr) if stderr else ""])
         cmds.append(cmd)
     # print(cmds)
