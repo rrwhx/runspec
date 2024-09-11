@@ -91,7 +91,13 @@ else:
     print("%s is not a spec cpu dir" % SPEC_DIR)
     exit(1)
 
+def ensure_directory_exists(directory_path):
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)
+
 stamp   = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if args.stamp == 'time' else args.stamp
+
+ensure_directory_exists(result_dir)
 log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
 
 print("log dir is %s" % log_dir,file=sys.stderr)
