@@ -132,7 +132,7 @@ elif SPEC == "2017":
     base_dir = SPEC_DIR + "/benchspec/CPU"
     sub_dir = "run/run_%s_%s_%s.0000" % (TUNE, SIZE, EXE_EXT)
 
-    speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C"]
+    speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C", "-b"]
     CINT = ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "548.exchange2_r", "557.xz_r"]
     CFP = ["503.bwaves_r", "507.cactuBSSN_r", "508.namd_r", "510.parest_r", "511.povray_r", "519.lbm_r", "521.wrf_r", "526.blender_r", "527.cam4_r", "538.imagick_r", "544.nab_r", "549.fotonik3d_r", "554.roms_r"]
 else:
