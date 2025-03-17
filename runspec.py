@@ -71,6 +71,10 @@ result_dir = args.result_dir
 
 #spec cpu diectory
 SPEC_DIR = os.path.abspath(args.dir)
+if not os.path.exists(SPEC_DIR):
+    print("cannot open `%s' (No such file or directory)" % SPEC_DIR)
+    exit(1)
+
 EXE_EXT = args.ext
 if not EXE_EXT:
     try:
