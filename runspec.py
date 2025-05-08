@@ -9,6 +9,7 @@ from functools import reduce
 from multiprocessing import Pool
 # import shutil
 import resource
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 parser = argparse.ArgumentParser(description =
 """Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,
@@ -287,15 +288,51 @@ def RUN(benchmarks):
 #     if not dry_run:
 #         print("score : %.3f" % reduce(lambda x, y: x*y, scores)**(1.0/len(scores)))
 
-def RUN_MT2(benchmarks):
+# def RUN_MT2(benchmarks):
+#     cmds = []
+#     for i in benchmarks:
+#         cmds += run_single(i, True)
+#     with Pool(THREADS) as p:
+#         r = p.map(os.system, cmds)
+#         for index in range(len(cmds)):
+#             print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
+#             print(cmds[index].split("&&")[1])
+
+def RUN_MT3(benchmarks):
     cmds = []
     for i in benchmarks:
         cmds += run_single(i, True)
-    with Pool(THREADS) as p:
-        r = p.map(os.system, cmds)
-        for index in range(len(cmds)):
-            print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
-            print(cmds[index].split("&&")[1])
+    with ThreadPoolExecutor(max_workers=THREADS) as executor:
+        h264_1_2017 = "--pass 1 --stats x264_stats.log --bitrate 1000 --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720"
+        h264_2_2017 = "--pass 2 --stats x264_stats.log --bitrate 1000 --dumpyuv 200 --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720"
+        cmdsA = [_ for _ in cmds if h264_2_2017 not in _]
+        cmdsB = [_ for _ in cmds if h264_2_2017 in _]
+        if cmdsB :
+            cmdsB = cmdsB[0] 
+            print("detected h264_2_2017")
+        futures = {
+            executor.submit(os.system, task): task for task in cmdsA
+        }
+
+        while futures:
+            done_future = next(as_completed(futures))
+            task_name = futures.pop(done_future)
+
+            try:
+                print(task_name)
+                result = done_future.result()
+                if result :
+                    print(f"FAIL:{task_name}")
+                else:
+                    print(f"SUCCESS:{task_name}")
+
+                if h264_1_2017 in task_name and not result:
+                    b2_future = executor.submit(os.system, h264_2_2017)
+                    futures[b2_future] = h264_2_2017
+                    print("2017 : Submitted h264_2 after h264_1")
+
+            except Exception as e:
+                print(f"Task {task_name} failed: {str(e)}")
 
 if not dry_run:
     print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
@@ -323,11 +360,11 @@ if THREADS == 1:
         RUN(b_fp)
 else:
     if "int" in benchmark:
-        RUN_MT2(CINT)
+        RUN_MT3(CINT)
     if "fp" in benchmark:
-        RUN_MT2(CFP)
+        RUN_MT3(CFP)
     if "all" in benchmark:
-        RUN_MT2(CINT + CFP)
+        RUN_MT3(CINT + CFP)
 
 if not dry_run:
     print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
