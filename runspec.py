@@ -80,8 +80,12 @@ EXE_EXT = args.ext
 if not EXE_EXT:
     try:
         exes = glob.glob(os.path.join(SPEC_DIR, "benchspec/*/*/run/*/perl*_base.*"))
-        exe_name = os.path.basename(exes[0])
-        EXE_EXT = exe_name[exe_name.find(".") + 1:]
+        exe_name = set([os.path.basename(_) for _ in exes])
+        exe_name_ext = [_[_.find(".") + 1:] for _ in exe_name]
+        if len(exe_name_ext) != 1:
+            print("multiple exe name ext found, please specify --ext", exe_name_ext)
+            exit(1)
+        EXE_EXT = exe_name_ext[0]
         # exe_name.split(base)
     except Exception:
         print("--ext was not specified, and auto probe failed")
