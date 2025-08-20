@@ -31,6 +31,7 @@ parser.add_argument('--title', default="test_title")
 parser.add_argument('--stamp', default="time")
 parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_result', help="location of cmd_prefix logs, defaults to ~/runspec_result")
 parser.add_argument('--dir', default=".")
+parser.add_argument('--exe', default="", help="spec cpu exe dir")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
@@ -72,6 +73,7 @@ result_dir = args.result_dir
 
 #spec cpu diectory
 SPEC_DIR = os.path.abspath(args.dir)
+EXE_DIR = os.path.abspath(args.exe) if args.exe else ""
 if not os.path.exists(SPEC_DIR):
     print("cannot open `%s' (No such file or directory)" % SPEC_DIR)
     exit(1)
@@ -135,6 +137,9 @@ elif SPEC == "2006":
     speccmd_ignore_prefix = ["-C"]
     CINT = ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk", "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref", "471.omnetpp", "473.astar", "483.xalancbmk"]
     CFP = ["410.bwaves", "416.gamess", "433.milc", "434.zeusmp", "435.gromacs", "436.cactusADM", "437.leslie3d", "444.namd", "447.dealII", "450.soplex", "453.povray", "454.calculix", "459.GemsFDTD", "465.tonto", "470.lbm", "481.wrf", "482.sphinx3"]
+#    CFP = ["410.bwaves", "433.milc", "434.zeusmp", "435.gromacs", "436.cactusADM", "437.leslie3d", "444.namd", "447.dealII", "450.soplex", "453.povray", "454.calculix", "459.GemsFDTD", "465.tonto", "470.lbm", "481.wrf", "482.sphinx3"]
+    INT_NO_FORTRAN = ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk", "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref", "471.omnetpp", "473.astar", "483.xalancbmk"]
+    FP_NO_FORTRAN = ["433.milc", "444.namd", "447.dealII", "450.soplex", "453.povray", "470.lbm", "482.sphinx3"]
 elif SPEC == "2017":
     # AAAAA
     SIZE = "refrate" if SIZE == "ref" else SIZE
@@ -144,6 +149,10 @@ elif SPEC == "2017":
     speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C", "-b"]
     CINT = ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "548.exchange2_r", "557.xz_r"]
     CFP = ["503.bwaves_r", "507.cactuBSSN_r", "508.namd_r", "510.parest_r", "511.povray_r", "519.lbm_r", "521.wrf_r", "526.blender_r", "527.cam4_r", "538.imagick_r", "544.nab_r", "549.fotonik3d_r", "554.roms_r"]
+
+    FPRATE_NO_FORTRAN = [ "508.namd_r", "510.parest_r", "511.povray_r", "519.lbm_r", "526.blender_r", "538.imagick_r", "544.nab_r"]
+    INTRATE_NO_FORTRAN = [ "500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "557.xz_r"]
+
 else:
     print(f"{SPEC} not exsited")
     exit(1)
@@ -214,6 +223,14 @@ def get_command(benchmark, speccmds_filename):
                     cmd = cmd[:i]
                     break
         # print(stdin, stdout, stderr, cmd)
+        if EXE_DIR :
+            cmd_sp = cmd.strip().split()
+            exepath = cmd_sp[0]
+            basename = os.path.basename(exepath)
+            benchname = basename[:basename.find("_")]
+            realpath_exe = glob.glob(os.path.join(EXE_DIR, benchname + "_*"))[0]
+            cmd = " ".join([realpath_exe] + cmd_sp[1:])
+        # print(cmd)
         intfp = ""
         if args.intfp:
             intfp = "int_" if benchmark in CINT else "fp_"
@@ -369,6 +386,12 @@ else:
         RUN_MT3(CFP)
     if "all" in benchmark:
         RUN_MT3(CINT + CFP)
+    if "fprate_no_fortran" in benchmark:
+        RUN_MT3(FPRATE_NO_FORTRAN)
+    if "intrate_no_fortran" in benchmark:
+        RUN_MT3(INTRATE_NO_FORTRAN)
+    if "no_fortran" in benchmark:
+        RUN_MT3(FPRATE_NO_FORTRAN + INTRATE_NO_FORTRAN)
 
 if not dry_run:
     print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
