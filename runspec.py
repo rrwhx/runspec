@@ -7,7 +7,7 @@ import glob
 from datetime import datetime
 from functools import reduce
 from multiprocessing import Pool
-# import shutil
+import shutil
 import resource
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -32,6 +32,7 @@ parser.add_argument('--stamp', default="time")
 parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_result', help="location of cmd_prefix logs, defaults to ~/runspec_result")
 parser.add_argument('--dir', default=".")
 parser.add_argument('--exe', default="", help="spec cpu exe dir")
+parser.add_argument('--copy_exe', action="store_true", help="copy exe to run dir, used for perlbench test")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
@@ -229,7 +230,11 @@ def get_command(benchmark, speccmds_filename):
             basename = os.path.basename(exepath)
             benchname = basename[:basename.find("_")]
             realpath_exe = glob.glob(os.path.join(EXE_DIR, benchname + "_*"))[0]
-            cmd = " ".join([realpath_exe] + cmd_sp[1:])
+            if args.copy_exe:
+                shutil.copy2(realpath_exe, os.path.dirname(speccmds_filename))
+                cmd = " ".join(["./" + os.path.basename(realpath_exe)] + cmd_sp[1:])
+            else:
+                cmd = " ".join([realpath_exe] + cmd_sp[1:])
         # print(cmd)
         intfp = ""
         if args.intfp:
@@ -329,7 +334,7 @@ def RUN_MT3(benchmarks):
         cmdsA = [_ for _ in cmds if h264_2_2017 not in _]
         cmdsB = [_ for _ in cmds if h264_2_2017 in _]
         if cmdsB :
-            cmdsB = cmdsB[0] 
+            cmdsB = cmdsB[0]
             print("detected h264_2_2017")
         futures = {
             executor.submit(os.system, task): task for task in cmdsA
