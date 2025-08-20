@@ -18,7 +18,8 @@ result_file = args.input
 r = {}
 
 f = open(result_file, "r")
-for line in list(f.readlines())[1:]:
+lines = list(f.readlines())
+for line in lines[1:]:
     line_sp = line.strip().strip(',').split(",")
     benchname = line_sp[0].split("_")[0]
     benchvalues = [float(_) for _ in line_sp[1:]]
@@ -41,6 +42,7 @@ print(list(zip(*list(r_reduced.values()))))
 
 result_filename = args.output
 with open(result_filename, "w") as result_file:
+    result_file.write(lines[0])
     for k, v in r_reduced.items():
         result_file.write(k + ",")
         result_file.write(",".join(list(map(str, v))))
