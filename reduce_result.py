@@ -2,8 +2,7 @@
 import sys
 import os
 import argparse
-import numpy as np
-from scipy.stats import gmean
+from math import log, exp
 
 parser = argparse.ArgumentParser(description ="aollect perf output", formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('-i', '--input', required=True)
@@ -31,13 +30,15 @@ for line in lines[1:]:
 r_reduced = {}
 for k,v in r.items():
     r_reduced[k] = [sum(x) for x in zip(*v)]
-    
+
 print(r_reduced)
 
-# r_reduced["GMEAN"] = [gmean(x) for x in zip(*r_reduced.values())]
-r_reduced["Average"] = [np.average(x) for x in zip(*r_reduced.values())]
-
-print
+Average = [sum(x) / len(x) for x in zip(*r_reduced.values())]
+GMEAN = [exp(sum(log(xi) for xi in x) / len(x)) for x in zip(*r_reduced.values()) ]
+Sum = [sum(x) for x in zip(*r_reduced.values())]
+r_reduced["Average"] = Average
+# r_reduced["GMEAN"] = GMEAN
+# r_reduced["Sum"] = Sum
 print(list(zip(*list(r_reduced.values()))))
 
 result_filename = args.output
