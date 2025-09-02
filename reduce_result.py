@@ -34,7 +34,12 @@ for k,v in r.items():
 print(r_reduced)
 
 Average = [sum(x) / len(x) for x in zip(*r_reduced.values())]
-GMEAN = [exp(sum(log(xi) for xi in x) / len(x)) for x in zip(*r_reduced.values()) ]
+def geometric_mean(x):
+    if any(xi <= 0 for xi in x):
+        return 0.0
+    return exp(sum(log(xi) for xi in x) / len(x))
+
+GMEAN = [geometric_mean(x) for x in zip(*r_reduced.values())]
 Sum = [sum(x) for x in zip(*r_reduced.values())]
 r_reduced["Average"] = Average
 # r_reduced["GMEAN"] = GMEAN
