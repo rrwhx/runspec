@@ -229,7 +229,7 @@ def get_command(benchmark, speccmds_filename):
             exepath = cmd_sp[0]
             basename = os.path.basename(exepath)
             benchname = basename[:basename.find("_")]
-            realpath_exe = glob.glob(os.path.join(EXE_DIR, benchname + "_*"))[0]
+            realpath_exe = glob.glob(os.path.join(EXE_DIR, benchname + "*"))[0]
             if args.copy_exe:
                 shutil.copy2(realpath_exe, os.path.dirname(speccmds_filename))
                 cmd = " ".join(["./" + os.path.basename(realpath_exe)] + cmd_sp[1:])
