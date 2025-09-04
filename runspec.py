@@ -241,7 +241,7 @@ def get_command(benchmark, speccmds_filename):
             intfp = "int_" if benchmark in CINT else "fp_"
         logfile = log_dir + "/" + intfp + benchmark + "_" + str(index) + args.suffix
         if "%s" in cmd_prefix:
-            cmd_full_prefix = cmd_prefix % logfile
+            cmd_full_prefix = cmd_prefix.replace("%s", logfile)
         elif not cmd_prefix :
             cmd_full_prefix = ""
         else :
