@@ -33,6 +33,7 @@ parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_
 parser.add_argument('--dir', default=".")
 parser.add_argument('--exe', default="", help="spec cpu exe dir")
 parser.add_argument('--copy_exe', action="store_true", help="copy exe to run dir, used for perlbench test")
+parser.add_argument('--dup_exe', action='store_true', help="dup argv[0], used for some bt")
 parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
 args = parser.parse_args()
 
@@ -235,6 +236,8 @@ def get_command(benchmark, speccmds_filename):
                 cmd = " ".join(["./" + os.path.basename(realpath_exe)] + cmd_sp[1:])
             else:
                 cmd = " ".join([realpath_exe] + cmd_sp[1:])
+        if args.dup_exe:
+            cmd = cmd.strip().split()[0] + " " + cmd
         # print(cmd)
         intfp = ""
         if args.intfp:
