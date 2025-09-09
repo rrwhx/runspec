@@ -230,6 +230,13 @@ def get_command(benchmark, speccmds_filename):
             exepath = cmd_sp[0]
             basename = os.path.basename(exepath)
             benchname = basename[:basename.find("_")]
+            if "_base" in basename:
+                benchname = basename[:basename.find("_base")]
+            elif "_peak" in basename:
+                benchname = basename[:basename.find("_peak")]
+            else:
+                print(basename, "has not _base and _peak")
+                exit(0)
             realpath_exe = glob.glob(os.path.join(EXE_DIR, benchname + "*"))[0]
             if args.copy_exe:
                 shutil.copy2(realpath_exe, os.path.dirname(speccmds_filename))
