@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import csv
+import os
 
 def usage():
     print("Usage:", file=sys.stderr)
@@ -93,6 +94,17 @@ def read_csv_columns(filename, col_indices):
     print(f"从文件 {filename} 提取了 {len(extracted_data)} 行数据", file=sys.stderr)
     return extracted_data
 
+def generate_header(files_and_cols):
+    header = []
+    for files, cols in files_and_cols:
+        for filename in files:
+            # 获取无后缀的文件名
+            basename = os.path.splitext(os.path.basename(filename))[0]
+            # 为每个提取的列生成表头
+            for col_idx in cols:
+                header.append(f"{basename}_col{col_idx}")
+    return header
+
 def main():
     if len(sys.argv) < 3:
         usage()
@@ -102,6 +114,11 @@ def main():
         # 解析命令行参数
         files_and_cols = parse_arguments(sys.argv[1:])
         print(f"解析到 {len(files_and_cols)} 个文件组", file=sys.stderr)
+
+        # 生成并打印表头
+        header = generate_header(files_and_cols)
+        print("CSV表头:", file=sys.stderr)
+        print(",".join(header), file=sys.stderr)
 
         # 存储所有提取的数据
         all_extracted_data = []
@@ -120,6 +137,9 @@ def main():
         # 合并所有数据
         print("开始合并数据...", file=sys.stderr)
         writer = csv.writer(sys.stdout)
+
+        # 输出表头
+        writer.writerow(header)
 
         for row_idx in range(max_rows):
             combined_row = []
