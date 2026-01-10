@@ -3,7 +3,7 @@
 # Enhanced version with colorized output and parameter validation
 
 # Set environment limits
-ulimit -s unlimited
+ulimit -s 2000000
 ulimit -c unlimited
 
 # Color definitions
