@@ -39,9 +39,7 @@ result_filename = args.output
 with open(result_filename, "w") as result_file:
     result_file.write("benchmark," + ','.join(event_list) + '\n')
     for item in dir_list:
-        result_file.write(item+',')
-        for event in event_list:
-            result_file.write("%s," % data_dict[item][event])
-        result_file.write("\n")
+        row = [item] + [str(data_dict[item][event]) for event in event_list]
+        result_file.write(','.join(row) + '\n')
 
 
