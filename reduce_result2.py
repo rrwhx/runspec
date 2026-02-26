@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import sys
 import os
 import argparse
@@ -13,6 +13,7 @@ parser.add_argument('-i', '--input', required=True)
 parser.add_argument('-o', '--output', default="result.csv")
 parser.add_argument('-e', '--event',  default="instructions,branches")
 parser.add_argument('-r', '--reduce',  default="sum", help="arithmetic(mean)、geometric、harmonic(hmean)、median、sum、product、max、min")
+parser.add_argument('-r2', '--reduce2', default="mean", help="Second reduce method for groups (default: mean)")
 args = parser.parse_args()
 
 
@@ -72,51 +73,73 @@ methods = {
 def my_reduce(method, nums):
 
     if method not in methods:
-        print("不支持的方法。请选择: arithmetic, geometric, harmonic, median, sum, product, max, min.")
+        print(f"不支持的方法 '{method}'。请选择: arithmetic, geometric, harmonic, median, sum, product, max, min.", file=sys.stderr)
         exit(1)
 
     try:
         result = methods[method](nums)
-        print(f"使用方法 '{method}' 得到的结果为: {result}")
     except Exception as e:
-        print(f"计算时出现错误: {e}")
+        print(f"计算时出现错误: {e}", file=sys.stderr)
+        result = None
     return result
 
 
-print(args,file=sys.stderr)
+print(f"Arguments: {args}", file=sys.stderr)
 
 result_file = args.input
 
 r = {}
+header = ""
 
 f = open(result_file, "r")
-for line in list(f.readlines())[1:]:
+lines = list(f.readlines())
+if lines:
+    header = lines[0].strip()
+
+for line in lines[1:]:
     line_sp = line.strip().strip(',').split(",")
-    benchname = line_sp[0].split("_")[0]
+    benchname = line_sp[0].rsplit("_", 1)[0]
     benchvalues = [float(_) for _ in line_sp[1:]]
     if benchname not in r:
         r[benchname] = []
     r[benchname].append(benchvalues)
-    print(benchname, benchvalues)
-
-print(r)
 
 r_reduced = {}
 for k,v in r.items():
     r_reduced[k] = [my_reduce(args.reduce.lower(), x) for x in zip(*v)]
 
-print(r_reduced)
+# Second reduce by group
+groups = {}
+for k, v in r_reduced.items():
+    parts = k.split("-", 1)
+    if len(parts) > 1:
+        group_name = parts[0]
+        sub_name = parts[1]
+    else:
+        group_name = "all"
+        sub_name = k
 
-# r_reduced["GMEAN"] = [gmean(x) for x in zip(*r_reduced.values())]
-r_reduced["Average"] = [np.average(x) for x in zip(*r_reduced.values())]
+    if group_name not in groups:
+        groups[group_name] = []
+    groups[group_name].append((sub_name, v))
 
+final_results = {}
 
+for group_name, items in groups.items():
+    group_values = []
+    for sub_name, v in items:
+        final_results[sub_name] = v
+        group_values.append(v)
 
-print(list(zip(*list(r_reduced.values()))))
+    if group_values:
+        reduce2_name = f"{group_name}_{args.reduce2.lower()}"
+        final_results[reduce2_name] = [my_reduce(args.reduce2.lower(), x) for x in zip(*group_values)]
 
 result_filename = args.output
 with open(result_filename, "w") as result_file:
-    for k, v in r_reduced.items():
+    if header:
+        result_file.write(header + "\n")
+    for k, v in final_results.items():
         result_file.write(k + ",")
         result_file.write(",".join(list(map(str, v))))
         result_file.write("\n")
