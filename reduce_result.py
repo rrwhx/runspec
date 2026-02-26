@@ -9,11 +9,11 @@ import statistics
 
 
 parser = argparse.ArgumentParser(description ="aollect perf output", formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument('-i', '--input', required=True)
+parser.add_argument('input', help="Input CSV file")
 parser.add_argument('-o', '--output', default="result.csv")
 parser.add_argument('-e', '--event',  default="instructions,branches")
 parser.add_argument('-r', '--reduce',  default="sum", help="arithmetic(mean)、geometric、harmonic(hmean)、median、sum、product、max、min")
-parser.add_argument('-r2', '--reduce2', default="mean", help="Second reduce method for groups (default: mean)")
+parser.add_argument('-r2', '--reduce2', default="mean", help="Second reduce method for groups, default: mean")
 args = parser.parse_args()
 
 
@@ -108,32 +108,35 @@ r_reduced = {}
 for k,v in r.items():
     r_reduced[k] = [my_reduce(args.reduce.lower(), x) for x in zip(*v)]
 
-# Second reduce by group
-groups = {}
-for k, v in r_reduced.items():
-    parts = k.split("-", 1)
-    if len(parts) > 1:
-        group_name = parts[0]
-        sub_name = parts[1]
-    else:
-        group_name = "all"
-        sub_name = k
+if args.reduce2:
+    # Second reduce by group
+    groups = {}
+    for k, v in r_reduced.items():
+        parts = k.split("-", 1)
+        if len(parts) > 1:
+            group_name = parts[0]
+            sub_name = parts[1]
+        else:
+            group_name = "all"
+            sub_name = k
 
-    if group_name not in groups:
-        groups[group_name] = []
-    groups[group_name].append((sub_name, v))
+        if group_name not in groups:
+            groups[group_name] = []
+        groups[group_name].append((sub_name, v))
 
-final_results = {}
+    final_results = {}
 
-for group_name, items in groups.items():
-    group_values = []
-    for sub_name, v in items:
-        final_results[sub_name] = v
-        group_values.append(v)
+    for group_name, items in groups.items():
+        group_values = []
+        for sub_name, v in items:
+            final_results[sub_name] = v
+            group_values.append(v)
 
-    if group_values:
-        reduce2_name = f"{group_name}_{args.reduce2.lower()}"
-        final_results[reduce2_name] = [my_reduce(args.reduce2.lower(), x) for x in zip(*group_values)]
+        if group_values:
+            reduce2_name = f"{group_name}_{args.reduce2.lower()}"
+            final_results[reduce2_name] = [my_reduce(args.reduce2.lower(), x) for x in zip(*group_values)]
+else:
+    final_results = r_reduced
 
 result_filename = args.output
 with open(result_filename, "w") as result_file:
