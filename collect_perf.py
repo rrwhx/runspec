@@ -7,60 +7,65 @@ import re
 def parse_perf_file(filename):
     """Parse a single perf output file and return a dictionary of events."""
     data = {}
-    started = False
+
+    # Step 1: Read all lines from the file
     with open(filename, "r") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("Performance counter stats for"):
-                started = True
-                continue
-            if not started:
-                continue
+        lines = f.readlines()
 
-            if "seconds time elapsed" in line:
-                data["seconds time elapsed"] = line.split()[0]
-                continue
-            if "seconds user" in line:
-                data["seconds user"] = line.split()[0]
-                continue
-            if "seconds sys" in line:
-                data["seconds sys"] = line.split()[0]
-                continue
+    # Step 2: Process the lines
+    started = not any("Performance counter stats for" in line for line in lines)
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("Performance counter stats for"):
+            started = True
+            continue
+        if not started:
+            continue
 
-            # Remove sampling percentage like (71.34%)
-            line = re.sub(r'\(\s*\d+(?:\.\d+)?\s*%\s*\)', '', line).strip()
+        if "seconds time elapsed" in line:
+            data["seconds time elapsed"] = line.split()[0]
+            continue
+        if "seconds user" in line:
+            data["seconds user"] = line.split()[0]
+            continue
+        if "seconds sys" in line:
+            data["seconds sys"] = line.split()[0]
+            continue
 
-            parts = line.split('#', 1)
+        # Remove sampling percentage like (71.34%)
+        line = re.sub(r'\(\s*\d+(?:\.\d+)?\s*%\s*\)', '', line).strip()
 
-            primary_part = parts[0].strip()
-            if primary_part:
-                p_parts = primary_part.split()
-                if len(p_parts) >= 2:
-                    val_str = p_parts[0].replace(',', '')
+        parts = line.split('#', 1)
+
+        primary_part = parts[0].strip()
+        if primary_part:
+            p_parts = primary_part.split()
+            if len(p_parts) >= 2:
+                val_str = p_parts[0].replace(',', '')
+                try:
+                    float(val_str)
+                    name = p_parts[1]
+                    data[name] = val_str
+                except ValueError:
+                    if p_parts[0] == "<not" and len(p_parts) >= 3 and p_parts[1] in ["supported>", "counted>"]:
+                        name = p_parts[2]
+                        data[name] = ""
+
+        if len(parts) > 1:
+            secondary_part = parts[1].strip()
+            if "/sec" in secondary_part:
+                continue
+            if secondary_part:
+                s_parts = secondary_part.replace('%', '').split()
+                if len(s_parts) >= 2:
                     try:
-                        float(val_str)
-                        name = p_parts[1]
-                        data[name] = val_str
+                        float(s_parts[0])
+                        name = " ".join(s_parts[1:])
+                        data[name] = s_parts[0]
                     except ValueError:
-                        if p_parts[0] == "<not" and len(p_parts) >= 3 and p_parts[1] in ["supported>", "counted>"]:
-                            name = p_parts[2]
-                            data[name] = ""
-
-            if len(parts) > 1:
-                secondary_part = parts[1].strip()
-                if "/sec" in secondary_part:
-                    continue
-                if secondary_part:
-                    s_parts = secondary_part.replace('%', '').split()
-                    if len(s_parts) >= 2:
-                        try:
-                            float(s_parts[0])
-                            name = " ".join(s_parts[1:])
-                            data[name] = s_parts[0]
-                        except ValueError:
-                            pass
+                        pass
     return data
 
 def main():
