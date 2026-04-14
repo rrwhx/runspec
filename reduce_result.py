@@ -2,8 +2,6 @@
 import sys
 import os
 import argparse
-import numpy as np
-from scipy.stats import gmean
 import math
 import statistics
 
