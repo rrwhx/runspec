@@ -1,415 +1,697 @@
 #!/usr/bin/env python3
 # Source: https://github.com/rrwhx/runspec
-import os
-import sys
-import time
+"""Run SPEC CPU under an optional command prefix.
+
+Two ways to use this module:
+
+* CLI: same flags as before; emits a ``<title>_<spec>_<size>_<stamp>.csv``
+  plus a sibling ``.json`` with the structured run result.
+* As a library::
+
+      from runspec import Runner
+      result = Runner(dir="/path/to/spec",
+                      exe="/path/to/exes",
+                      benchmark="505",
+                      size="test",
+                      cmd_prefix="qemu-riscv64 -plugin foo -D %s -- ",
+                      intfp=True).run()
+      for b in result["benchmarks"]:
+          print(b["name"], b["logs"])
+
+  ``result`` matches the JSON file: ``spec_version``, ``size``, ``tune``,
+  ``log_dir``, ``csv_path``, ``json_path``, ``benchmarks`` (each with
+  ``reftime``, ``runtime``, ``ratio``, ``exit_code``, ``logs``, ``cmds``,
+  ``work_dir``), ``geomean``, ``exit_code``.
+"""
 import argparse
 import glob
+import json
+import math
+import os
+import re
+import resource
+import shlex
+import shutil
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from functools import reduce
-from multiprocessing import Pool
-import shutil
-import resource
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-parser = argparse.ArgumentParser(description =
-"""Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,
-Spec run directory should be prepared carefully,
-Run test, train and ref in spec directory(00), or just -a setup(06,17), """, formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument('-i', '--size', default="test", choices=['test', 'train', 'ref', 'refrate'])
-parser.add_argument('-b', '--benchmark', default="all", help="benchmark selection, all/int/fp, comma separated items")
-parser.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
-parser.add_argument('--ext', default="", help="auto probe, need not set")
-parser.add_argument('--suffix', default="", help="suffix of output file")
-parser.add_argument('-t', '--threads', default=1, type=int, help="Allow N jobs at once;")
-parser.add_argument('--redirect_stderr', action='store_true', help="redirect stderr to logfile.stderr")
-parser.add_argument('-l', '--loose', action='store_true', help="ignore errors")
-parser.add_argument('-n', '--dry_run', action='store_true', help="Don't actually run any cmd; just print them.")
-parser.add_argument('-v', '--verbose', action='store_true', help="Print cmd before exec cmd")
-parser.add_argument('--intfp', action='store_true', help="intfp prefix")
-parser.add_argument('-c', '--cmd_prefix', default='', help=r'cmd prefix before real cmd, %%s for output, eg: -c "perf stat -o %%s "')
-parser.add_argument('--title', default="test_title")
-parser.add_argument('--stamp', default="time")
-parser.add_argument('--result_dir', default=os.path.expanduser('~') + '/runspec_result', help="location of cmd_prefix logs, defaults to ~/runspec_result")
-parser.add_argument('--dir', default=".")
-parser.add_argument('--exe', default="", help="spec cpu exe dir")
-parser.add_argument('--copy_exe', action="store_true", help="copy exe to run dir, used for perlbench test")
-parser.add_argument('--dup_exe', action='store_true', help="dup argv[0], used for some bt")
-parser.add_argument('--slimit', type=int, default=-1,help="The limit of the stack size, 0 ulimited, or a number(MB), default: not modified")
-args = parser.parse_args()
-
-print(args,file=sys.stderr)
-
-slimit = args.slimit
-if slimit == 0:
-    resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-elif slimit > 0:
-    slimit <<= 20
-    resource.setrlimit(resource.RLIMIT_STACK, (slimit, slimit))
 
 
+_SPEC_LAYOUTS = {
+    "2000": {
+        "marker": "benchspec/CINT2000",
+        "base_subdir": "benchspec",
+        "ignore_prefix": ["-u"],
+        "CINT": ["164.gzip", "175.vpr", "176.gcc", "181.mcf", "186.crafty",
+                 "197.parser", "252.eon", "253.perlbmk", "254.gap", "255.vortex",
+                 "256.bzip2", "300.twolf"],
+        "CFP":  ["168.wupwise", "171.swim", "172.mgrid", "173.applu", "177.mesa",
+                 "178.galgel", "179.art", "183.equake", "187.facerec", "188.ammp",
+                 "189.lucas", "191.fma3d", "200.sixtrack", "301.apsi"],
+        "INT_NO_FORTRAN": [],
+        "FP_NO_FORTRAN": [],
+    },
+    "2006": {
+        "marker": "benchspec/CPU2006",
+        "base_subdir": "benchspec/CPU2006",
+        "ignore_prefix": ["-C"],
+        "CINT": ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk",
+                 "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref",
+                 "471.omnetpp", "473.astar", "483.xalancbmk"],
+        "CFP":  ["410.bwaves", "416.gamess", "433.milc", "434.zeusmp", "435.gromacs",
+                 "436.cactusADM", "437.leslie3d", "444.namd", "447.dealII",
+                 "450.soplex", "453.povray", "454.calculix", "459.GemsFDTD",
+                 "465.tonto", "470.lbm", "481.wrf", "482.sphinx3"],
+        "INT_NO_FORTRAN": ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf",
+                           "445.gobmk", "456.hmmer", "458.sjeng", "462.libquantum",
+                           "464.h264ref", "471.omnetpp", "473.astar", "483.xalancbmk"],
+        "FP_NO_FORTRAN": ["433.milc", "444.namd", "447.dealII", "450.soplex",
+                          "453.povray", "470.lbm", "482.sphinx3"],
+    },
+    "2017": {
+        "marker": "benchspec/CPU",
+        "base_subdir": "benchspec/CPU",
+        "ignore_prefix": ["-E", "-r", "-N C", "-C", "-b"],
+        "CINT": ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r",
+                 "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r",
+                 "548.exchange2_r", "557.xz_r"],
+        "CFP":  ["503.bwaves_r", "507.cactuBSSN_r", "508.namd_r", "510.parest_r",
+                 "511.povray_r", "519.lbm_r", "521.wrf_r", "526.blender_r",
+                 "527.cam4_r", "538.imagick_r", "544.nab_r", "549.fotonik3d_r",
+                 "554.roms_r"],
+        "INT_NO_FORTRAN": ["500.perlbench_r", "502.gcc_r", "505.mcf_r",
+                           "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r",
+                           "531.deepsjeng_r", "541.leela_r", "557.xz_r"],
+        "FP_NO_FORTRAN":  ["508.namd_r", "510.parest_r", "511.povray_r",
+                           "519.lbm_r", "526.blender_r", "538.imagick_r",
+                           "544.nab_r"],
+    },
+}
 
-# runspec config
-SIZE = args.size
-# only 2017
-TUNE = args.tune # "base"/"peak"
-# 0: max, 1: single_thread, other: other
-THREADS = args.threads
-ignore_error = args.loose
-dry_run = args.dry_run
-verbose = args.verbose
 
-# print cmd by order
-if dry_run:
-    THREADS = 1
+def _detect_spec_version(spec_dir):
+    for v, info in _SPEC_LAYOUTS.items():
+        if os.path.exists(os.path.join(spec_dir, info["marker"])):
+            return v
+    return None
 
-# prefix config
-# cmd_prefix = "/home/lxy/instrument/pin-3.24/pin -t /home/lxy/instrument/x86_indirect_branch_analysis/TraceInsImm/obj-intel64/TraceInsImm.so -o %s -- "
-# cmd_prefix = "/home/lxy/bt/qemu-6.2.0/build/qemu-x86_64 "
-# cmd_prefix = "taskset -c " + cpu + " perf stat -o %s "
-# cmd_prefix = "taskset -c 8 perf stat -e cycles,instructions,L1-dcache-loads,L1-dcache-load-misses,r2012,dTLB-load-misses -o %s "
-# cmd_prefix = "/bin/qemu-aarch64 -plugin /home/lxy/bt/qemu-plugins_cpp/libbbv.so -d plugin -D %s "
-cmd_prefix = args.cmd_prefix
 
-title = args.title
-result_dir = args.result_dir
+def _detect_ext(spec_dir):
+    exes = glob.glob(os.path.join(spec_dir, "benchspec/*/*/run/run_*.0000"))
+    names = {os.path.basename(p) for p in exes}
+    return {n.rstrip(".0000").split("_", maxsplit=3)[-1] for n in names}
 
-#spec cpu diectory
-SPEC_DIR = os.path.abspath(args.dir)
-EXE_DIR = os.path.abspath(args.exe) if args.exe else ""
-if not os.path.exists(SPEC_DIR):
-    print("cannot open `%s' (No such file or directory)" % SPEC_DIR)
-    exit(1)
 
-EXE_EXT = args.ext
-if not EXE_EXT:
+def _matches(query, candidate, substring=False):
+    """Strict-by-default benchmark name match.
+
+    Exact, prefix (``525.x264`` -> ``525.x264_r``), or numeric id alone
+    (``505`` -> ``505.mcf_r``). ``substring=True`` restores the legacy
+    behaviour where ``505`` would also match ``500.perlbench_r`` etc.
+    """
+    if substring:
+        return query in candidate
+    if query == candidate:
+        return True
+    if candidate.startswith(query + ".") or candidate.startswith(query + "_"):
+        return True
+    if query.isdigit():
+        m = re.match(r"^(\d+)\.", candidate)
+        if m and m.group(1) == query:
+            return True
+    return False
+
+
+def _waitstatus_to_rc(r):
+    """Reduce os.system's encoded wait status to a sane exit code."""
+    if r == 0:
+        return 0
     try:
-        exes = glob.glob(os.path.join(SPEC_DIR, "benchspec/*/*/run/run_*.0000"))
-        exe_name = set([os.path.basename(_) for _ in exes])
-        exe_name_ext = set([_.rstrip(".0000").split("_", maxsplit=3)[-1] for _ in exe_name])
-        if len(exe_name_ext) != 1:
-            print("multiple exe name ext found, please specify --ext", exe_name_ext)
-            exit(1)
-        EXE_EXT = exe_name_ext.pop()
-        # exe_name.split(base)
-    except Exception:
-        print("--ext was not specified, and auto probe failed")
-        exit(1)
-if os.path.exists(os.path.join(SPEC_DIR, "benchspec/CINT2000")):
-    SPEC = "2000"
-elif os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU2006")):
-    SPEC = "2006"
-elif os.path.exists(os.path.join(SPEC_DIR, "benchspec/CPU")):
-    SPEC = "2017"
-else:
-    print("%s is not a spec cpu dir" % SPEC_DIR)
-    exit(1)
+        return os.waitstatus_to_exitcode(r) or 1
+    except (AttributeError, ValueError):
+        return r
 
-def ensure_directory_exists(directory_path):
-    if not os.path.exists(directory_path):
-        os.makedirs(directory_path)
 
-stamp   = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if args.stamp == 'time' else args.stamp
+def _json_safe(obj):
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
 
-ensure_directory_exists(result_dir)
-log_dir = "%s/%s_%s_%s_%s" % (result_dir, title, SPEC, SIZE, stamp)
 
-print("log dir is %s" % log_dir,file=sys.stderr)
+class Runner:
+    """Reusable SPEC CPU runner.
 
-# DO NOT EDIT FOLLOWING
-if not dry_run and "%s" in cmd_prefix:
-    os.makedirs(log_dir, exist_ok=True)
+    Constructor params mirror the CLI flags one-for-one. ``run()`` returns
+    a dict with the timing CSV path, JSON path, and per-benchmark records;
+    the same content is written to ``<log_dir>.json`` next to ``<log_dir>.csv``.
 
-if not THREADS:
-    # do not eat all the threads
-    THREADS = (os.cpu_count() - 4) // 2
+    For wrappers: prefer ``pre_argv=["qemu", ..., "-D", "{log}", "--"]`` over
+    ``cmd_prefix="qemu ... -D %s --"`` — list form avoids shell-quoting bugs.
+    Either way, each benchmark's resolved log paths come back in
+    ``result["benchmarks"][i]["logs"]`` so callers no longer need to glob.
+    """
 
-if SPEC == "2000":
-    # AAAAA
-    base_dir = SPEC_DIR+ "/benchspec"
-    sub_dir = {"test": "run/00000001", "train":"run/00000002", "ref":"run/00000003"}[SIZE]
+    def __init__(self, *,
+                 dir=".",
+                 exe="",
+                 benchmark="all",
+                 size="test",
+                 tune="base",
+                 ext="",
+                 suffix="",
+                 threads=1,
+                 redirect_stderr=False,
+                 loose=False,
+                 dry_run=False,
+                 verbose=False,
+                 intfp=False,
+                 cmd_prefix="",
+                 pre_argv=None,
+                 title="test_title",
+                 stamp="time",
+                 result_dir=None,
+                 copy_exe=False,
+                 dup_exe=False,
+                 slimit=-1,
+                 match_substring=False):
+        self.spec_dir = os.path.abspath(dir)
+        self.exe_dir = os.path.abspath(exe) if exe else ""
+        self.benchmark_arg = benchmark
+        self.size = size                       # user-facing, used for log_dir
+        self.tune = tune
+        self.suffix = suffix
+        self.threads = threads if threads else max(1, (os.cpu_count() - 4) // 2)
+        self.redirect_stderr = redirect_stderr
+        self.loose = loose
+        self.dry_run = dry_run
+        self.verbose = verbose
+        self.intfp = intfp
+        self.cmd_prefix = cmd_prefix
+        self.pre_argv = list(pre_argv) if pre_argv else None
+        self.title = title
+        self.copy_exe = copy_exe
+        self.dup_exe = dup_exe
+        self.slimit = slimit
+        self.match_substring = match_substring
 
-    speccmd_ignore_prefix = ["-u"]
-    CINT = ["164.gzip", "175.vpr", "176.gcc", "181.mcf", "186.crafty", "197.parser", "252.eon", "253.perlbmk", "254.gap", "255.vortex", "256.bzip2", "300.twolf"]
-    CFP = ["168.wupwise", "171.swim", "172.mgrid", "173.applu", "177.mesa", "178.galgel", "179.art", "183.equake", "187.facerec", "188.ammp", "189.lucas", "191.fma3d", "200.sixtrack", "301.apsi"]
-elif SPEC == "2006":
-    # AAAAA
-    base_dir = SPEC_DIR + "/benchspec/CPU2006"
-    sub_dir = "run/run_base_%s_%s.0000" % (SIZE, EXE_EXT)
+        if self.dry_run:
+            self.threads = 1
 
-    speccmd_ignore_prefix = ["-C"]
-    CINT = ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk", "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref", "471.omnetpp", "473.astar", "483.xalancbmk"]
-    CFP = ["410.bwaves", "416.gamess", "433.milc", "434.zeusmp", "435.gromacs", "436.cactusADM", "437.leslie3d", "444.namd", "447.dealII", "450.soplex", "453.povray", "454.calculix", "459.GemsFDTD", "465.tonto", "470.lbm", "481.wrf", "482.sphinx3"]
-#    CFP = ["410.bwaves", "433.milc", "434.zeusmp", "435.gromacs", "436.cactusADM", "437.leslie3d", "444.namd", "447.dealII", "450.soplex", "453.povray", "454.calculix", "459.GemsFDTD", "465.tonto", "470.lbm", "481.wrf", "482.sphinx3"]
-    INT_NO_FORTRAN = ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk", "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref", "471.omnetpp", "473.astar", "483.xalancbmk"]
-    FP_NO_FORTRAN = ["433.milc", "444.namd", "447.dealII", "450.soplex", "453.povray", "470.lbm", "482.sphinx3"]
-elif SPEC == "2017":
-    # AAAAA
-    SIZE = "refrate" if SIZE == "ref" else SIZE
-    base_dir = SPEC_DIR + "/benchspec/CPU"
-    sub_dir = "run/run_%s_%s_%s.0000" % (TUNE, SIZE, EXE_EXT)
+        if not os.path.exists(self.spec_dir):
+            raise FileNotFoundError(
+                f"cannot open `{self.spec_dir}' (No such file or directory)")
 
-    speccmd_ignore_prefix = ["-E", "-r", "-N C", "-C", "-b"]
-    CINT = ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "548.exchange2_r", "557.xz_r"]
-    CFP = ["503.bwaves_r", "507.cactuBSSN_r", "508.namd_r", "510.parest_r", "511.povray_r", "519.lbm_r", "521.wrf_r", "526.blender_r", "527.cam4_r", "538.imagick_r", "544.nab_r", "549.fotonik3d_r", "554.roms_r"]
+        self.spec = _detect_spec_version(self.spec_dir)
+        if self.spec is None:
+            raise ValueError(f"{self.spec_dir} is not a spec cpu dir")
 
-    FP_NO_FORTRAN = [ "508.namd_r", "510.parest_r", "511.povray_r", "519.lbm_r", "526.blender_r", "538.imagick_r", "544.nab_r"]
-    INT_NO_FORTRAN = [ "500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r", "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r", "557.xz_r"]
+        layout = _SPEC_LAYOUTS[self.spec]
+        self.base_dir = os.path.join(self.spec_dir, layout["base_subdir"])
+        if not os.path.exists(self.base_dir):
+            raise FileNotFoundError(f"{self.base_dir} not existed")
 
-else:
-    print(f"{SPEC} not exsited")
-    exit(1)
+        self.speccmd_ignore_prefix = layout["ignore_prefix"]
+        self.CINT = list(layout["CINT"])
+        self.CFP = list(layout["CFP"])
+        self.INT_NO_FORTRAN = list(layout["INT_NO_FORTRAN"])
+        self.FP_NO_FORTRAN = list(layout["FP_NO_FORTRAN"])
 
-# if "perf" in cmd_prefix or "pin" in cmd_prefix:
-#     cmd = (cmd_prefix % ("/dev/null")) + " /bin/ls 1>/dev/null 2>/dev/null"
-#     if os.system(cmd):
-#         print("can not run prefix")
-#         print(cmd)
-#         exit(1)
+        # The 2000 layout has no run_*.0000 files, so ext is meaningless there.
+        self.ext = ext
+        if not self.ext and self.spec != "2000":
+            exts = _detect_ext(self.spec_dir)
+            if len(exts) != 1:
+                raise RuntimeError(
+                    "--ext was not specified, and auto probe failed "
+                    f"(found: {sorted(exts)})")
+            self.ext = next(iter(exts))
 
-if not os.path.exists(base_dir) :
-    print(f"{base_dir} not existed")
-    exit(1)
+        # Internal "effective" size: 2017 lays out refrate dirs even when the
+        # user says -i ref. log_dir keeps the user's spelling.
+        self._effective_size = ("refrate"
+                                if self.spec == "2017" and self.size == "ref"
+                                else self.size)
 
-score_file = open(log_dir + ".csv", "w")
+        if self.spec == "2000":
+            self.sub_dir = {"test": "run/00000001",
+                            "train": "run/00000002",
+                            "ref": "run/00000003"}[self._effective_size]
+        elif self.spec == "2006":
+            self.sub_dir = f"run/run_base_{self._effective_size}_{self.ext}.0000"
+        else:
+            self.sub_dir = (f"run/run_{self.tune}_{self._effective_size}_"
+                            f"{self.ext}.0000")
 
-def get_reftime(reftime_filename, benchmark):
-    f = open(reftime_filename)
-    if SPEC == "2000" and SIZE == "test" and benchmark == "172.mgrid" :
-        return 1.0
-    first_line = f.readlines()[0 if SPEC == "2017" else 1].strip().split()
-    if SPEC == "2017" and SIZE == "refrate":
-        assert first_line[0] == "refrate"
-    reftime = float(first_line[-1])
-    f.close()
-    return reftime
+        if result_dir is None:
+            result_dir = os.path.expanduser("~") + "/runspec_result"
+        self.result_dir = result_dir
+        os.makedirs(self.result_dir, exist_ok=True)
 
-def get_command(benchmark, speccmds_filename):
-    f = open(speccmds_filename)
-    lines = f.readlines()
-    f.close()
-    cmds = []
-    index = 0
-    for line in lines:
-        ignore = False
-        for prefix in speccmd_ignore_prefix:
-            if line.startswith(prefix):
-                ignore = True
-                break
-        if ignore:
-            continue
-        index += 1
-        cmd_args = line[:-1].split(" ")
-        # print(cmd_args)
-        i = 0
-        stdin = ""
-        stdout = ""
-        stderr = ""
-        while i < len(cmd_args) :
-            if cmd_args[i] == "-i":
-                stdin = cmd_args[i + 1]
-                i += 1
-            elif cmd_args[i] == "-o":
-                stdout = cmd_args[i + 1]
-                i += 1
-            elif cmd_args[i] == "-e":
-                stderr = cmd_args[i + 1]
-                i += 1
-            else :
-                break
-            i += 1
-        cmd = " ".join(cmd_args[i:])
-        if SPEC == "2017":
-            for i in range(0, len(cmd)):
-                # 2017 append < in > stdout 2>> stderr at end of command
-                if cmd[i] in ['>', '<', '2>>'] :
-                    cmd = cmd[:i]
+        self.stamp = (datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+                      if stamp == "time" else stamp)
+        # Preserves the original log_dir spelling (user-supplied size, not
+        # the remapped one) so existing wrappers find the same path.
+        self.log_dir = (f"{self.result_dir}/{self.title}_{self.spec}_"
+                        f"{self.size}_{self.stamp}")
+        self.csv_path = self.log_dir + ".csv"
+        self.json_path = self.log_dir + ".json"
+
+        if not self.dry_run and self._cmd_uses_log_dir():
+            os.makedirs(self.log_dir, exist_ok=True)
+
+    # ------------------------------------------------------------------ helpers
+
+    def _cmd_uses_log_dir(self):
+        if "%s" in self.cmd_prefix:
+            return True
+        if self.pre_argv and any("{log}" in a for a in self.pre_argv):
+            return True
+        if self.redirect_stderr:
+            return True
+        return False
+
+    def _apply_slimit(self):
+        if self.slimit == 0:
+            resource.setrlimit(resource.RLIMIT_STACK,
+                               (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+        elif self.slimit > 0:
+            n = self.slimit << 20
+            resource.setrlimit(resource.RLIMIT_STACK, (n, n))
+
+    def _dir_prefix(self, benchmark):
+        if self.spec == "2000":
+            return "CINT2000" if benchmark in self.CINT else "CFP2000"
+        return ""
+
+    def _work_dir(self, benchmark):
+        return os.path.join(self.base_dir, self._dir_prefix(benchmark),
+                            benchmark, self.sub_dir)
+
+    def _reftime_path(self, benchmark):
+        return os.path.join(self.base_dir, self._dir_prefix(benchmark),
+                            benchmark, f"data/{self._effective_size}/reftime")
+
+    def _get_reftime(self, benchmark):
+        if (self.spec == "2000" and self._effective_size == "test"
+                and benchmark == "172.mgrid"):
+            return 1.0
+        with open(self._reftime_path(benchmark)) as f:
+            line_idx = 0 if self.spec == "2017" else 1
+            parts = f.readlines()[line_idx].strip().split()
+        if self.spec == "2017" and self._effective_size == "refrate":
+            assert parts[0] == "refrate"
+        return float(parts[-1])
+
+    def _intfp_prefix(self, benchmark):
+        if not self.intfp:
+            return ""
+        return "int-" if benchmark in self.CINT else "xfp-"
+
+    def _log_path(self, benchmark, index):
+        return (f"{self.log_dir}/{self._intfp_prefix(benchmark)}"
+                f"{benchmark}_{index}{self.suffix}")
+
+    def _build_prefix(self, logfile):
+        if self.pre_argv is not None:
+            resolved = [a.replace("{log}", logfile) for a in self.pre_argv]
+            return (shlex.join(resolved) + " ") if resolved else ""
+        if "%s" in self.cmd_prefix:
+            return self.cmd_prefix.replace("%s", logfile)
+        if not self.cmd_prefix:
+            return ""
+        return self.cmd_prefix + " "
+
+    def _build_cmds(self, benchmark, speccmds_filename):
+        with open(speccmds_filename) as f:
+            lines = f.readlines()
+        cmds = []
+        logs = []
+        index = 0
+        for line in lines:
+            if any(line.startswith(p) for p in self.speccmd_ignore_prefix):
+                continue
+            index += 1
+            cmd_args = line[:-1].split(" ")
+            i = 0
+            stdin = stdout = stderr = ""
+            while i < len(cmd_args):
+                if cmd_args[i] == "-i":
+                    stdin = cmd_args[i + 1]; i += 2
+                elif cmd_args[i] == "-o":
+                    stdout = cmd_args[i + 1]; i += 2
+                elif cmd_args[i] == "-e":
+                    stderr = cmd_args[i + 1]; i += 2
+                else:
                     break
-        # print(stdin, stdout, stderr, cmd)
-        if EXE_DIR :
-            cmd_sp = cmd.strip().split()
-            exepath = cmd_sp[0]
-            basename = os.path.basename(exepath)
-            benchname = basename[:basename.find("_")]
-            if "_base" in basename:
-                benchname = basename[:basename.find("_base")]
-            elif "_peak" in basename:
-                benchname = basename[:basename.find("_peak")]
-            else:
-                print(basename, "has not _base and _peak")
-                exit(0)
-            realpath_exe = glob.glob(os.path.join(EXE_DIR, benchname + "*"))[0]
-            if args.copy_exe:
-                shutil.copy2(realpath_exe, os.path.dirname(speccmds_filename))
-                cmd = " ".join(["./" + os.path.basename(realpath_exe)] + cmd_sp[1:])
-            else:
-                cmd = " ".join([realpath_exe] + cmd_sp[1:])
-        if args.dup_exe:
-            cmd = cmd.strip().split()[0] + " " + cmd
-        # print(cmd)
-        intfp = ""
-        if args.intfp:
-            intfp = "int-" if benchmark in CINT else "xfp-"
-        logfile = log_dir + "/" + intfp + benchmark + "_" + str(index) + args.suffix
-        if "%s" in cmd_prefix:
-            cmd_full_prefix = cmd_prefix.replace("%s", logfile)
-        elif not cmd_prefix :
-            cmd_full_prefix = ""
-        else :
-            cmd_full_prefix = cmd_prefix + " "
-        if args.redirect_stderr:
-            stderr = logfile + ".stderr"
-        cmd = " ".join([cmd_full_prefix, cmd, ("<"+stdin) if stdin else "", ("1>" +stdout) if stdout else "", ("2>" + stderr) if stderr else ""])
-        cmds.append(cmd)
-    # print(cmds)
-    return cmds
+            cmd = " ".join(cmd_args[i:])
+            if self.spec == "2017":
+                # 2017 appends `< in > out 2>> err` to the command line; strip.
+                for j in range(len(cmd)):
+                    if cmd[j] in ('>', '<', '2>>'):
+                        cmd = cmd[:j]
+                        break
+            if self.exe_dir:
+                cmd_sp = cmd.strip().split()
+                basename = os.path.basename(cmd_sp[0])
+                if "_base" in basename:
+                    benchname = basename[:basename.find("_base")]
+                elif "_peak" in basename:
+                    benchname = basename[:basename.find("_peak")]
+                else:
+                    raise RuntimeError(f"{basename} has not _base and _peak")
+                realpath_exe = glob.glob(os.path.join(
+                    self.exe_dir, benchname + "*"))[0]
+                if self.copy_exe:
+                    shutil.copy2(realpath_exe,
+                                 os.path.dirname(speccmds_filename))
+                    cmd = " ".join(["./" + os.path.basename(realpath_exe)]
+                                   + cmd_sp[1:])
+                else:
+                    cmd = " ".join([realpath_exe] + cmd_sp[1:])
+            if self.dup_exe:
+                cmd = cmd.strip().split()[0] + " " + cmd
+            logfile = self._log_path(benchmark, index)
+            logs.append(logfile)
+            if self.redirect_stderr:
+                stderr = logfile + ".stderr"
+            prefix = self._build_prefix(logfile)
+            full = " ".join([prefix, cmd,
+                             f"<{stdin}" if stdin else "",
+                             f"1>{stdout}" if stdout else "",
+                             f"2>{stderr}" if stderr else ""])
+            cmds.append(full)
+        return cmds, logs
 
-def run_single(benchmark, get_cmd_only=False):
-    DIR_PREFIX = ""
-    if SPEC == "2000" :
-        DIR_PREFIX = 'CINT2000' if benchmark in CINT else 'CFP2000'
-    work_dir = os.path.join(base_dir, DIR_PREFIX,  benchmark, sub_dir)
-    if not os.path.exists(work_dir):
-        print(f"{work_dir} not existed")
-        exit(1)
-    cmds = get_command(benchmark, os.path.join(work_dir, "speccmds.cmd"))
-    if get_cmd_only :
-        return ["cd %s && %s" % (work_dir, cmd) for cmd in cmds]
+    def _select(self):
+        """Resolve ``-b`` argument to a deduped, ordered benchmark list."""
+        keywords = {
+            "int":            self.CINT,
+            "fp":             self.CFP,
+            "all":            self.CINT + self.CFP,
+            "int_no_fortran": self.INT_NO_FORTRAN,
+            "fp_no_fortran":  self.FP_NO_FORTRAN,
+            "no_fortran":     self.INT_NO_FORTRAN + self.FP_NO_FORTRAN,
+        }
+        selected = []
+        seen = set()
 
-    reftime = get_reftime(os.path.join(base_dir, DIR_PREFIX, benchmark, "data/%s/reftime" % (SIZE)), benchmark)
-    os.chdir(work_dir)
-    begin = time.time()
-    for cmd in cmds:
-        if dry_run or verbose:
-            print("cd %s && %s" % (work_dir, cmd))
+        def add(items):
+            for it in items:
+                if it not in seen:
+                    seen.add(it)
+                    selected.append(it)
 
-        if not dry_run:
-            r = os.system(cmd)
-            if r:
-                print("error %s, return value:%d" % (benchmark, r))
-                print("work_dir %s" % (work_dir))
-                print("cmd %s" % (cmd))
-                if not ignore_error :
-                    exit(r)
-    end = time.time()
-    runtime = end - begin
-    return reftime, runtime, reftime / runtime
+        for tok in self.benchmark_arg.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok in keywords:
+                add(keywords[tok])
+                continue
+            add([b for b in self.CINT + self.CFP
+                 if _matches(tok, b, substring=self.match_substring)])
+        return selected
 
-def cd_exec(work_dir, cmd):
-    os.chdir(work_dir)
-    return os.system(cmd)
+    # ------------------------------------------------------------------ run
 
-def RUN(benchmarks):
-    scores = []
-    for benchmark in benchmarks:
-        reftime, runtime, ratio = run_single(benchmark)
-        if not dry_run:
-            print("%20s\t%.1f\t%.3f\t%.3f" % (benchmark, reftime, runtime, ratio))
-            score_file.write('%s,%f,%f,%f\n' % (benchmark, reftime, runtime, ratio))
-        scores.append(ratio)
-    if not dry_run:
-        geo_mean = reduce(lambda x, y: x*y, scores)**(1.0/len(scores))
-        print("score : %.3f" % geo_mean)
-        score_file.write("score,,,%s\n" % geo_mean)
+    def run_single(self, benchmark):
+        """Run one benchmark sequentially; returns a result dict."""
+        work_dir = self._work_dir(benchmark)
+        if not os.path.exists(work_dir):
+            raise FileNotFoundError(f"{work_dir} not existed")
+        cmds, logs = self._build_cmds(
+            benchmark, os.path.join(work_dir, "speccmds.cmd"))
+        reftime = self._get_reftime(benchmark)
 
-
-# def RUN_MT(benchmarks):
-#     scores = []
-#     with Pool(THREADS) as p:
-#         r = p.map(run_single, benchmarks)
-#         for index in range(len(benchmarks)):
-#             reftime, runtime, ratio = r[index]
-#             if not dry_run:
-#                 print("%20s\t%.1f\t%.3f\t%.3f" % (benchmarks[index], reftime, runtime, ratio))
-#             scores.append(ratio)
-#     if not dry_run:
-#         print("score : %.3f" % reduce(lambda x, y: x*y, scores)**(1.0/len(scores)))
-
-# def RUN_MT2(benchmarks):
-#     cmds = []
-#     for i in benchmarks:
-#         cmds += run_single(i, True)
-#     with Pool(THREADS) as p:
-#         r = p.map(os.system, cmds)
-#         for index in range(len(cmds)):
-#             print("FAIL:", end='') if r[index] else print("SUCCESS:", end='')
-#             print(cmds[index].split("&&")[1])
-
-def RUN_MT3(benchmarks):
-    cmds = []
-    for i in benchmarks:
-        cmds += run_single(i, True)
-    with ThreadPoolExecutor(max_workers=THREADS) as executor:
-        h264_1_2017 = "--pass 1 --stats x264_stats.log --bitrate 1000 --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720"
-        h264_2_2017 = "--pass 2 --stats x264_stats.log --bitrate 1000 --dumpyuv 200 --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720"
-        cmdsA = [_ for _ in cmds if h264_2_2017 not in _]
-        cmdsB = [_ for _ in cmds if h264_2_2017 in _]
-        if cmdsB :
-            cmdsB = cmdsB[0]
-            print("detected h264_2_2017")
-        futures = {
-            executor.submit(os.system, task): task for task in cmdsA
+        # Save+restore cwd so callers don't inherit the benchmark's run dir.
+        original_cwd = os.getcwd()
+        os.chdir(work_dir)
+        begin = time.time()
+        exit_code = 0
+        try:
+            for cmd in cmds:
+                if self.dry_run or self.verbose:
+                    print(f"cd {work_dir} && {cmd}")
+                if not self.dry_run:
+                    r = os.system(cmd)
+                    rc = _waitstatus_to_rc(r)
+                    if rc:
+                        print(f"error {benchmark}, return value:{r}")
+                        print(f"work_dir {work_dir}")
+                        print(f"cmd {cmd}")
+                        exit_code = rc
+                        if not self.loose:
+                            break
+        finally:
+            os.chdir(original_cwd)
+        runtime = time.time() - begin
+        ratio = (reftime / runtime) if runtime > 0 else float("nan")
+        return {
+            "name": benchmark,
+            "reftime": reftime,
+            "runtime": runtime,
+            "ratio": ratio,
+            "exit_code": exit_code,
+            "logs": logs,
+            "cmds": cmds,
+            "work_dir": work_dir,
         }
 
-        while futures:
-            done_future = next(as_completed(futures))
-            task_name = futures.pop(done_future)
+    def _run_st(self, selected):
+        results = []
+        for b in selected:
+            r = self.run_single(b)
+            results.append(r)
+            if not self.dry_run:
+                print("%20s\t%.1f\t%.3f\t%.3f" %
+                      (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+            if r["exit_code"] and not self.loose:
+                break
+        return results
 
-            try:
-                print(task_name)
-                result = done_future.result()
-                if result :
-                    print(f"FAIL:{task_name}")
-                else:
-                    print(f"SUCCESS:{task_name}")
+    def _run_mt(self, selected):
+        # Build per-benchmark cmds first, then flatten into a task list.
+        bench_info = {}
+        all_tasks = []  # list of (benchmark, work_dir, raw_cmd, full_task_str)
+        for b in selected:
+            work_dir = self._work_dir(b)
+            if not os.path.exists(work_dir):
+                raise FileNotFoundError(f"{work_dir} not existed")
+            cmds, logs = self._build_cmds(
+                b, os.path.join(work_dir, "speccmds.cmd"))
+            reftime = self._get_reftime(b)
+            bench_info[b] = {
+                "name": b, "reftime": reftime, "runtime": 0.0,
+                "ratio": float("nan"), "exit_code": 0,
+                "logs": logs, "cmds": cmds, "work_dir": work_dir,
+            }
+            for c in cmds:
+                all_tasks.append((b, work_dir, c, f"cd {work_dir} && {c}"))
 
-                if h264_1_2017 in task_name and not result:
-                    b2_future = executor.submit(os.system, h264_2_2017)
-                    futures[b2_future] = h264_2_2017
-                    print("2017 : Submitted h264_2 after h264_1")
+        # The h264 2-pass workaround from the original: run pass-2 after
+        # pass-1 succeeds. Preserved as-is.
+        h264_1 = ("--pass 1 --stats x264_stats.log --bitrate 1000 --frames 1000"
+                  " -o BuckBunny_New.264 BuckBunny.yuv 1280x720")
+        h264_2 = ("--pass 2 --stats x264_stats.log --bitrate 1000 --dumpyuv 200"
+                  " --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720")
+        tasks_a = [t for t in all_tasks if h264_2 not in t[3]]
+        if any(h264_2 in t[3] for t in all_tasks):
+            print("detected h264_2_2017")
 
-            except Exception as e:
-                print(f"Task {task_name} failed: {str(e)}")
+        def _run(task_tuple):
+            _, _, _, task_str = task_tuple
+            t0 = time.time()
+            r = os.system(task_str)
+            return r, time.time() - t0
 
-if not dry_run:
-    print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+        with ThreadPoolExecutor(max_workers=self.threads) as executor:
+            futures = {executor.submit(_run, t): t for t in tasks_a}
+            while futures:
+                done = next(as_completed(futures))
+                task_tuple = futures.pop(done)
+                b, work_dir, _c, task_str = task_tuple
+                try:
+                    print(task_str)
+                    r, elapsed = done.result()
+                    rc = _waitstatus_to_rc(r)
+                    if b in bench_info:
+                        bench_info[b]["runtime"] += elapsed
+                        if rc:
+                            bench_info[b]["exit_code"] = rc
+                    if rc:
+                        print(f"FAIL:{task_str}")
+                    else:
+                        print(f"SUCCESS:{task_str}")
+                    if h264_1 in task_str and not rc:
+                        follow = (b, work_dir, h264_2, h264_2)
+                        futures[executor.submit(_run, follow)] = follow
+                        print("2017 : Submitted h264_2 after h264_1")
+                except Exception as e:
+                    print(f"Task {task_str} failed: {e}")
 
-def canonical_list(raw_name, canonical_name):
-    r = []
-    for raw in raw_name:
-        for item in canonical_name:
-            if raw in item:
-                r.append(item)
-    return r
+        for info in bench_info.values():
+            if info["runtime"] > 0 and not math.isnan(info["reftime"]):
+                info["ratio"] = info["reftime"] / info["runtime"]
+        return list(bench_info.values())
 
-benchmark = args.benchmark.split(",")
-b_int = canonical_list(benchmark, CINT)
-b_fp = canonical_list(benchmark, CFP)
+    # ------------------------------------------------------------------ output
 
-if THREADS == 1:
-    if "int" in benchmark or "all" in benchmark:
-        RUN(CINT)
-    if "fp" in benchmark or "all" in benchmark:
-        RUN(CFP)
-    if b_int:
-        RUN(b_int)
-    if b_fp:
-        RUN(b_fp)
-else:
-    if "int" in benchmark:
-        RUN_MT3(CINT)
-    if "fp" in benchmark:
-        RUN_MT3(CFP)
-    if "all" in benchmark:
-        RUN_MT3(CINT + CFP)
-    if "fp_no_fortran" in benchmark:
-        RUN_MT3(FP_NO_FORTRAN)
-    if "int_no_fortran" in benchmark:
-        RUN_MT3(INT_NO_FORTRAN)
-    if "no_fortran" in benchmark:
-        RUN_MT3(FP_NO_FORTRAN + INT_NO_FORTRAN)
+    def _write_csv(self, results, geomean):
+        with open(self.csv_path, "w") as f:
+            for r in results:
+                if r["reftime"] is None or r["runtime"] is None:
+                    continue
+                f.write("%s,%f,%f,%f\n" % (r["name"], r["reftime"],
+                                            r["runtime"], r["ratio"]))
+            if geomean is not None:
+                f.write("score,,,%s\n" % geomean)
 
-if not dry_run:
-    print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    def _write_json(self, payload):
+        with open(self.json_path, "w") as f:
+            json.dump(_json_safe(payload), f, indent=2)
 
-score_file.close()
+    def run(self):
+        self._apply_slimit()
+        if not self.dry_run:
+            print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+
+        selected = self._select()
+        results = []
+        geomean = None
+        error = None
+
+        if not selected:
+            error = (f"no benchmarks matched -b {self.benchmark_arg!r} "
+                     f"for SPEC {self.spec}")
+            print(f"[!] {error}", file=sys.stderr)
+        elif self.threads == 1:
+            results = self._run_st(selected)
+        else:
+            results = self._run_mt(selected)
+
+        if results and not self.dry_run:
+            ratios = [r["ratio"] for r in results
+                      if r["ratio"] is not None
+                      and not math.isnan(r["ratio"])
+                      and r["ratio"] > 0]
+            if ratios:
+                geomean = reduce(lambda x, y: x * y,
+                                 ratios) ** (1.0 / len(ratios))
+                print("score : %.3f" % geomean)
+
+        if not self.dry_run:
+            self._write_csv(results, geomean)
+            print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+
+        if not results:
+            exit_code = 2
+        elif any(r["exit_code"] for r in results):
+            exit_code = 0 if self.loose else 1
+        else:
+            exit_code = 0
+
+        payload = {
+            "spec_version": self.spec,
+            "size": self.size,
+            "tune": self.tune,
+            "log_dir": self.log_dir,
+            "csv_path": self.csv_path,
+            "json_path": self.json_path,
+            "benchmarks": results,
+            "geomean": geomean,
+            "exit_code": exit_code,
+        }
+        if error is not None:
+            payload["error"] = error
+        if not self.dry_run:
+            self._write_json(payload)
+        return payload
+
+
+# --------------------------------------------------------------------- CLI
+
+def _make_parser():
+    p = argparse.ArgumentParser(
+        description=(
+            "Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, "
+            "strace, time), get log or performance,\n"
+            "Spec run directory should be prepared carefully,\n"
+            "Run test, train and ref in spec directory(00), or just -a "
+            "setup(06,17), "),
+        formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument('-i', '--size', default="test",
+                   choices=['test', 'train', 'ref', 'refrate'])
+    p.add_argument('-b', '--benchmark', default="all",
+                   help="benchmark selection, all/int/fp, comma separated items")
+    p.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
+    p.add_argument('--ext', default="", help="auto probe, need not set")
+    p.add_argument('--suffix', default="", help="suffix of output file")
+    p.add_argument('-t', '--threads', default=1, type=int,
+                   help="Allow N jobs at once;")
+    p.add_argument('--redirect_stderr', action='store_true',
+                   help="redirect stderr to logfile.stderr")
+    p.add_argument('-l', '--loose', action='store_true', help="ignore errors")
+    p.add_argument('-n', '--dry_run', action='store_true',
+                   help="Don't actually run any cmd; just print them.")
+    p.add_argument('-v', '--verbose', action='store_true',
+                   help="Print cmd before exec cmd")
+    p.add_argument('--intfp', action='store_true', help="intfp prefix")
+    p.add_argument('-c', '--cmd_prefix', default='',
+                   help=(r'cmd prefix before real cmd, %%s for output, '
+                         r'eg: -c "perf stat -o %%s "'))
+    p.add_argument('--title', default="test_title")
+    p.add_argument('--stamp', default="time")
+    p.add_argument('--result_dir',
+                   default=os.path.expanduser('~') + '/runspec_result',
+                   help="location of cmd_prefix logs, defaults to "
+                        "~/runspec_result")
+    p.add_argument('--dir', default=".")
+    p.add_argument('--exe', default="", help="spec cpu exe dir")
+    p.add_argument('--copy_exe', action="store_true",
+                   help="copy exe to run dir, used for perlbench test")
+    p.add_argument('--dup_exe', action='store_true',
+                   help="dup argv[0], used for some bt")
+    p.add_argument('--slimit', type=int, default=-1,
+                   help="The limit of the stack size, 0 ulimited, or a "
+                        "number(MB), default: not modified")
+    p.add_argument('--match-substring', dest='match_substring',
+                   action='store_true',
+                   help="legacy substring match for -b (default: exact / "
+                        "prefix / numeric-id)")
+    return p
+
+
+def _cli():
+    args = _make_parser().parse_args()
+    print(args, file=sys.stderr)
+    try:
+        runner = Runner(
+            dir=args.dir, exe=args.exe, benchmark=args.benchmark,
+            size=args.size, tune=args.tune, ext=args.ext,
+            suffix=args.suffix, threads=args.threads,
+            redirect_stderr=args.redirect_stderr, loose=args.loose,
+            dry_run=args.dry_run, verbose=args.verbose,
+            intfp=args.intfp, cmd_prefix=args.cmd_prefix,
+            title=args.title, stamp=args.stamp,
+            result_dir=args.result_dir, copy_exe=args.copy_exe,
+            dup_exe=args.dup_exe, slimit=args.slimit,
+            match_substring=args.match_substring,
+        )
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        print(str(e))
+        sys.exit(1)
+    print("log dir is %s" % runner.log_dir, file=sys.stderr)
+    payload = runner.run()
+    sys.exit(payload["exit_code"])
+
+
+if __name__ == "__main__":
+    _cli()
