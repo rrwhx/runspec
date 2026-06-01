@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 # Source: https://github.com/rrwhx/runspec
 
-# 检查参数数量（1 或 2 个参数）
-if [ $# -lt 1 ] || [ $# -gt 2 ]; then
-    echo "Usage: $0 <suffix> [objdump_command]"
+# 检查参数数量（至少 1 个参数）
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <suffix> [objdump_command] [args...]"
     exit 1
 fi
 
 suffix="$1"
-target_dir="./${suffix}_asm"
+# 使用环境变量 TARGET_DIR 指定输出目录，默认值为 ./${suffix}_asm
+target_dir="${TARGET_DIR:-./${suffix}_asm}"
+shift 1
 
-# 如果提供了 $2，则使用它作为 objdump 命令
-if [ -n "$2" ]; then
-    objdump_cmd="$2"
+# 如果提供了后续参数，则将其作为 objdump 命令
+if [ $# -ge 1 ]; then
+    objdump_cmd=( "$@" )
 else
     # 否则尝试查找可用的 objdump 命令
     if command -v llvm-objdump &> /dev/null; then
-        objdump_cmd="llvm-objdump"
+        objdump_cmd=("llvm-objdump")
     elif command -v objdump &> /dev/null; then
-        objdump_cmd="objdump"
+        objdump_cmd=("objdump")
     else
         echo "Error: Neither 'llvm-objdump' nor 'objdump' is available in PATH."
         exit 1
@@ -26,12 +28,12 @@ else
 fi
 
 # 检查指定的 objdump 命令是否可执行
-if ! command -v "$objdump_cmd" &> /dev/null; then
-    echo "Error: Command '$objdump_cmd' not found or not executable."
+if ! command -v "${objdump_cmd[0]}" &> /dev/null; then
+    echo "Error: Command '${objdump_cmd[*]}' not found or not executable."
     exit 1
 fi
 
-echo "Using objdump command: $objdump_cmd"
+echo "Using objdump command: ${objdump_cmd[*]}"
 
 # 创建目标目录
 mkdir -p "$target_dir"
@@ -48,7 +50,7 @@ for file in benchspec/*/*/exe/*."$suffix"; do
     base_name=$(basename "$file" ".$suffix")
     # 反汇编并输出到目标文件
     echo "Processing: $file"
-    "$objdump_cmd" -d "$file" > "${target_dir}/${base_name}"
+    "${objdump_cmd[@]}" -d "$file" > "${target_dir}/${base_name}"
     ((matched++))
 done
 
