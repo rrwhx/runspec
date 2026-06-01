@@ -1,4 +1,5 @@
 #!/bin/bash
+# Source: https://github.com/rrwhx/runspec
 # SPEC CPU Benchmark Runner
 # Enhanced version with colorized output and parameter validation
 

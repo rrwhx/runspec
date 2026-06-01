@@ -1,4 +1,5 @@
 #!/bin/bash -x
+# Source: https://github.com/rrwhx/runspec
 DIR17=$(realpath .)
 cd ${DIR17}/benchspec/CPU/500.perlbench_r/run/run_base_test_${EXT17}.0000 &&  ./perlbench_r_base.${EXT17} -I. -I./lib makerand.pl   1>makerand.out 2>makerand.err
 cd ${DIR17}/benchspec/CPU/500.perlbench_r/run/run_base_test_${EXT17}.0000 &&  ./perlbench_r_base.${EXT17} -I. -I./lib test.pl   1>test.out 2>test.err

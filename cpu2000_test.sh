@@ -1,4 +1,5 @@
 #!/bin/bash -x
+# Source: https://github.com/rrwhx/runspec
 DIR00=$(realpath .)
 cd ${DIR00}/benchspec/CINT2000/164.gzip/run/00000001    && ./gzip_base.${EXT00} input.compressed 2  1>input.compressed.out 2>input.compressed.err
 cd ${DIR00}/benchspec/CINT2000/175.vpr/run/00000001     && ./vpr_base.${EXT00} net.in arch.in place.out dum.out -nodisp -place_only -init_t 5 -exit_t 0.005 -alpha_t 0.9412 -inner_num 2  1>place_log.out 2>place_log.err

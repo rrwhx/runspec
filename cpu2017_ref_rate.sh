@@ -1,4 +1,5 @@
 #!/bin/bash -x
+# Source: https://github.com/rrwhx/runspec
 DIR17=$(realpath .)
 cd ${DIR17}/benchspec/CPU/500.perlbench_r/run/run_base_refrate_${EXT17}.0000 &&  ./perlbench_r_base.${EXT17} -I./lib checkspam.pl 2500 5 25 11 150 1 1 1 1   1>checkspam.2500.5.25.11.150.1.1.1.1.out 2>checkspam.2500.5.25.11.150.1.1.1.1.err
 cd ${DIR17}/benchspec/CPU/500.perlbench_r/run/run_base_refrate_${EXT17}.0000 &&  ./perlbench_r_base.${EXT17} -I./lib diffmail.pl 4 800 10 17 19 300   1>diffmail.4.800.10.17.19.300.out 2>diffmail.4.800.10.17.19.300.err

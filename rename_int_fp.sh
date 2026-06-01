@@ -1,4 +1,5 @@
 #!/bin/bash
+# Source: https://github.com/rrwhx/runspec
 
 # 检查是否提供了目录参数
 if [ $# -ne 1 ]; then

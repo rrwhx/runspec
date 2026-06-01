@@ -1,4 +1,6 @@
 # runspec
+Source: https://github.com/rrwhx/runspec
+
 用于收集任何spec cpu(2000/2006/2017)的数据
 
 ## 简介

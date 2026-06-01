@@ -1,4 +1,5 @@
 #!/bin/bash -x
+# Source: https://github.com/rrwhx/runspec
 DIR06=$(realpath .)
 cd ${DIR06}/benchspec/CPU2006/400.perlbench/run/run_base_train_${EXT06}.0000   &&  ./perlbench_base.${EXT06} -I./lib diffmail.pl 2 550 15 24 23 100  1>diffmail.2.550.15.24.23.100.out 2>diffmail.2.550.15.24.23.100.err
 cd ${DIR06}/benchspec/CPU2006/400.perlbench/run/run_base_train_${EXT06}.0000   &&  ./perlbench_base.${EXT06} -I./lib perfect.pl b 3  1>perfect.b.3.out 2>perfect.b.3.err
