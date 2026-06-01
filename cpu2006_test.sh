@@ -1,4 +1,5 @@
 #!/bin/bash -x
+# Source: https://github.com/rrwhx/runspec
 DIR06=$(realpath .)
 cd ${DIR06}/benchspec/CPU2006/400.perlbench/run/run_base_test_${EXT06}.0000  &&  ./perlbench_base.${EXT06} -I. -I./lib attrs.pl  1>attrs.out 2>attrs.err
 cd ${DIR06}/benchspec/CPU2006/400.perlbench/run/run_base_test_${EXT06}.0000  &&  ./perlbench_base.${EXT06} -I. -I./lib gv.pl  1>gv.out 2>gv.err

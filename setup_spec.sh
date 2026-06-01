@@ -1,4 +1,5 @@
 #!/bin/bash
+# Source: https://github.com/rrwhx/runspec
 
 if [ "$#" -ne 1 ]; then
   echo "Usage: $0 config_file" >&2

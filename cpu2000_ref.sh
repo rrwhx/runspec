@@ -1,4 +1,5 @@
 #!/bin/bash -x
+# Source: https://github.com/rrwhx/runspec
 DIR00=$(realpath .)
 cd ${DIR00}/benchspec/CINT2000/164.gzip/run/00000003    &&  ./gzip_base.${EXT00} input.source 60  1>input.source.out 2>input.source.err
 cd ${DIR00}/benchspec/CINT2000/164.gzip/run/00000003    &&  ./gzip_base.${EXT00} input.log 60  1>input.log.out 2>input.log.err

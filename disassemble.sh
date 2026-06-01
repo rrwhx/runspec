@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Source: https://github.com/rrwhx/runspec
 
 # 检查参数数量（1 或 2 个参数）
 if [ $# -lt 1 ] || [ $# -gt 2 ]; then
