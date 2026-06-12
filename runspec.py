@@ -313,7 +313,10 @@ class Runner:
     def _intfp_prefix(self, benchmark):
         if not self.intfp:
             return ""
-        return "int-" if benchmark in self.CINT else "xfp-"
+        return self._score_type(benchmark) + "-"
+
+    def _score_type(self, benchmark):
+        return "int" if benchmark in self.CINT else "xfp"
 
     def _log_path(self, benchmark, index):
         return (f"{self.log_dir}/{self._intfp_prefix(benchmark)}"
@@ -456,6 +459,7 @@ class Runner:
         ratio = (reftime / runtime) if runtime > 0 else float("nan")
         return {
             "name": benchmark,
+            "score_type": self._score_type(benchmark),
             "reftime": reftime,
             "runtime": runtime,
             "ratio": ratio,
@@ -489,7 +493,8 @@ class Runner:
                 b, os.path.join(work_dir, "speccmds.cmd"))
             reftime = self._get_reftime(b)
             bench_info[b] = {
-                "name": b, "reftime": reftime, "runtime": 0.0,
+                "name": b, "score_type": self._score_type(b),
+                "reftime": reftime, "runtime": 0.0,
                 "ratio": float("nan"), "exit_code": 0,
                 "logs": logs, "cmds": cmds, "work_dir": work_dir,
             }
@@ -542,17 +547,43 @@ class Runner:
                 info["ratio"] = info["reftime"] / info["runtime"]
         return list(bench_info.values())
 
+    @staticmethod
+    def _valid_ratios(results):
+        return [r["ratio"] for r in results
+                if r["ratio"] is not None
+                and not math.isnan(r["ratio"])
+                and r["ratio"] > 0]
+
+    @staticmethod
+    def _geomean_from_ratios(ratios):
+        if not ratios:
+            return None
+        return reduce(lambda x, y: x * y, ratios) ** (1.0 / len(ratios))
+
+    def _score_groups(self, results):
+        int_results = [r for r in results if r["name"] in self.CINT]
+        fp_results = [r for r in results if r["name"] in self.CFP]
+        groups = []
+        if int_results:
+            groups.append(int_results)
+        if fp_results:
+            groups.append(fp_results)
+        return groups
+
     # ------------------------------------------------------------------ output
 
-    def _write_csv(self, results, geomean):
+    def _write_csv(self, results):
         with open(self.csv_path, "w") as f:
-            for r in results:
-                if r["reftime"] is None or r["runtime"] is None:
-                    continue
-                f.write("%s,%f,%f,%f\n" % (r["name"], r["reftime"],
-                                            r["runtime"], r["ratio"]))
-            if geomean is not None:
-                f.write("score,,,%s\n" % geomean)
+            for group_results in self._score_groups(results):
+                for r in group_results:
+                    if r["reftime"] is None or r["runtime"] is None:
+                        continue
+                    f.write("%s,%f,%f,%f\n" % (r["name"], r["reftime"],
+                                                r["runtime"], r["ratio"]))
+                group_geomean = self._geomean_from_ratios(
+                    self._valid_ratios(group_results))
+                if group_geomean is not None:
+                    f.write("score,,,%s\n" % group_geomean)
 
     def _write_json(self, payload):
         with open(self.json_path, "w") as f:
@@ -578,17 +609,13 @@ class Runner:
             results = self._run_mt(selected)
 
         if results and not self.dry_run:
-            ratios = [r["ratio"] for r in results
-                      if r["ratio"] is not None
-                      and not math.isnan(r["ratio"])
-                      and r["ratio"] > 0]
+            ratios = self._valid_ratios(results)
             if ratios:
-                geomean = reduce(lambda x, y: x * y,
-                                 ratios) ** (1.0 / len(ratios))
+                geomean = self._geomean_from_ratios(ratios)
                 print("score : %.3f" % geomean)
 
         if not self.dry_run:
-            self._write_csv(results, geomean)
+            self._write_csv(results)
             print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
 
         if not results:
@@ -597,6 +624,11 @@ class Runner:
             exit_code = 0 if self.loose else 1
         else:
             exit_code = 0
+
+        int_results = [r for r in results if r["score_type"] == "int"]
+        xfp_results = [r for r in results if r["score_type"] == "xfp"]
+        int_geomean = self._geomean_from_ratios(self._valid_ratios(int_results))
+        xfp_geomean = self._geomean_from_ratios(self._valid_ratios(xfp_results))
 
         payload = {
             "spec_version": self.spec,
@@ -607,6 +639,8 @@ class Runner:
             "json_path": self.json_path,
             "benchmarks": results,
             "geomean": geomean,
+            "int_geomean": int_geomean,
+            "xfp_geomean": xfp_geomean,
             "exit_code": exit_code,
         }
         if error is not None:
