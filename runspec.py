@@ -471,14 +471,48 @@ class Runner:
 
     def _run_st(self, selected):
         results = []
-        for b in selected:
-            r = self.run_single(b)
-            results.append(r)
+
+        # 按 score_type 分组
+        int_benchmarks = [b for b in selected if self._score_type(b) == "int"]
+        xfp_benchmarks = [b for b in selected if self._score_type(b) == "xfp"]
+
+        # 执行 INT benchmarks
+        if int_benchmarks:
+            for b in int_benchmarks:
+                r = self.run_single(b)
+                results.append(r)
+                if not self.dry_run:
+                    print("%20s\t%.1f\t%.3f\t%.3f" %
+                          (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                if r["exit_code"] and not self.loose:
+                    return results
+
+            # INT 完成后立即打印 INT score
             if not self.dry_run:
-                print("%20s\t%.1f\t%.3f\t%.3f" %
-                      (r["name"], r["reftime"], r["runtime"], r["ratio"]))
-            if r["exit_code"] and not self.loose:
-                break
+                int_ratios = self._valid_ratios(results)
+                if int_ratios:
+                    int_score = self._geomean_from_ratios(int_ratios)
+                    print("int score : %.3f" % int_score)
+
+        # 执行 FP benchmarks
+        if xfp_benchmarks:
+            for b in xfp_benchmarks:
+                r = self.run_single(b)
+                results.append(r)
+                if not self.dry_run:
+                    print("%20s\t%.1f\t%.3f\t%.3f" %
+                          (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                if r["exit_code"] and not self.loose:
+                    return results
+
+            # FP 完成后立即打印 FP score
+            if not self.dry_run:
+                xfp_results = [r for r in results if r["score_type"] == "xfp"]
+                xfp_ratios = self._valid_ratios(xfp_results)
+                if xfp_ratios:
+                    xfp_score = self._geomean_from_ratios(xfp_ratios)
+                    print("xfp score : %.3f" % xfp_score)
+
         return results
 
     def _run_mt(self, selected):
