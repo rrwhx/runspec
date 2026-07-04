@@ -56,7 +56,7 @@ _SPEC_LAYOUTS = {
     "2006": {
         "marker": "benchspec/CPU2006",
         "base_subdir": "benchspec/CPU2006",
-        "ignore_prefix": ["-C"],
+        "ignore_prefix": ["-C", "-u", "-E", "-b", "-S"],
         "CINT": ["400.perlbench", "401.bzip2", "403.gcc", "429.mcf", "445.gobmk",
                  "456.hmmer", "458.sjeng", "462.libquantum", "464.h264ref",
                  "471.omnetpp", "473.astar", "483.xalancbmk"],
@@ -73,7 +73,7 @@ _SPEC_LAYOUTS = {
     "2017": {
         "marker": "benchspec/CPU",
         "base_subdir": "benchspec/CPU",
-        "ignore_prefix": ["-E", "-r", "-N C", "-C", "-b"],
+        "ignore_prefix": ["-E", "-r", "-N", "-C", "-u", "-b", "-S"],
         "CINT": ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r",
                  "523.xalancbmk_r", "525.x264_r", "531.deepsjeng_r", "541.leela_r",
                  "548.exchange2_r", "557.xz_r"],
