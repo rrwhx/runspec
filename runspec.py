@@ -518,7 +518,7 @@ class Runner:
     def _run_mt(self, selected):
         # Build per-benchmark cmds first, then flatten into a task list.
         bench_info = {}
-        all_tasks = []  # list of (benchmark, work_dir, raw_cmd, full_task_str)
+        all_tasks = []  # list of (benchmark, work_dir, raw_cmd, full_task_str, idx)
         for b in selected:
             work_dir = self._work_dir(b)
             if not os.path.exists(work_dir):
@@ -532,8 +532,8 @@ class Runner:
                 "ratio": float("nan"), "exit_code": 0,
                 "logs": logs, "cmds": cmds, "work_dir": work_dir,
             }
-            for c in cmds:
-                all_tasks.append((b, work_dir, c, f"cd {work_dir} && {c}"))
+            for idx, c in enumerate(cmds, 1):
+                all_tasks.append((b, work_dir, c, f"cd {work_dir} && {c}", idx))
 
         # The h264 2-pass workaround from the original: run pass-2 after
         # pass-1 succeeds. Preserved as-is.
@@ -546,19 +546,19 @@ class Runner:
             print("detected h264_2_2017")
 
         def _run(task_tuple):
-            _, _, _, task_str = task_tuple
+            _, _, _, task_str, _ = task_tuple
             t0 = time.time()
             r = os.system(task_str)
             return r, time.time() - t0
 
+        failures = []
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
             futures = {executor.submit(_run, t): t for t in tasks_a}
             while futures:
                 done = next(as_completed(futures))
                 task_tuple = futures.pop(done)
-                b, work_dir, _c, task_str = task_tuple
+                b, work_dir, _c, task_str, idx = task_tuple
                 try:
-                    print(task_str)
                     r, elapsed = done.result()
                     rc = _waitstatus_to_rc(r)
                     if b in bench_info:
@@ -566,15 +566,28 @@ class Runner:
                         if rc:
                             bench_info[b]["exit_code"] = rc
                     if rc:
-                        print(f"FAIL:{task_str}")
+                        print(f"FAIL: {b} #{idx}  {task_str}")
+                        failures.append((b, idx, task_str))
                     else:
-                        print(f"SUCCESS:{task_str}")
+                        print(f"SUCCESS: {b} #{idx}")
                     if h264_1 in task_str and not rc:
-                        follow = (b, work_dir, h264_2, h264_2)
+                        h264_2_task_str = task_str.replace(h264_1, h264_2)
+                        follow = (b, work_dir, h264_2,
+                                  h264_2_task_str, idx + 1)
                         futures[executor.submit(_run, follow)] = follow
                         print("2017 : Submitted h264_2 after h264_1")
                 except Exception as e:
-                    print(f"Task {task_str} failed: {e}")
+                    print(f"FAIL: {b} #{idx}  exception: {e}")
+                    failures.append((b, idx, task_str))
+
+        # Print failure summary so FAILs are not buried among SUCCESS lines
+        if failures:
+            print("\n" + "=" * 60)
+            print(f"FAILURES: {len(failures)} task(s) failed")
+            print("=" * 60)
+            for b, idx, task_str in failures:
+                print(f"  {b} #{idx}: {task_str}")
+            print("=" * 60)
 
         for info in bench_info.values():
             if info["runtime"] > 0 and not math.isnan(info["reftime"]):
