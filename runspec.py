@@ -36,7 +36,6 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from functools import reduce
 
 
 _SPEC_LAYOUTS = {
@@ -101,7 +100,7 @@ def _detect_spec_version(spec_dir):
 def _detect_ext(spec_dir):
     exes = glob.glob(os.path.join(spec_dir, "benchspec/*/*/run/run_*.0000"))
     names = {os.path.basename(p) for p in exes}
-    return {n.rstrip(".0000").split("_", maxsplit=3)[-1] for n in names}
+    return {n.removesuffix(".0000").split("_", maxsplit=3)[-1] for n in names}
 
 
 def _matches(query, candidate, substring=False):
@@ -188,7 +187,7 @@ class Runner:
         self.size = size                       # user-facing, used for log_dir
         self.tune = tune
         self.suffix = suffix
-        self.threads = threads if threads else max(1, (os.cpu_count() - 4) // 2)
+        self.threads = threads if threads else max(1, ((os.cpu_count() or 1) - 4) // 2)
         self.redirect_stderr = redirect_stderr
         self.loose = loose
         self.dry_run = dry_run
@@ -241,9 +240,14 @@ class Runner:
                                 else self.size)
 
         if self.spec == "2000":
-            self.sub_dir = {"test": "run/00000001",
-                            "train": "run/00000002",
-                            "ref": "run/00000003"}[self._effective_size]
+            _size_map_2000 = {"test": "run/00000001",
+                              "train": "run/00000002",
+                              "ref": "run/00000003"}
+            if self._effective_size not in _size_map_2000:
+                raise ValueError(
+                    f"size '{self.size}' is not valid for SPEC 2000 "
+                    f"(choose from: test, train, ref)")
+            self.sub_dir = _size_map_2000[self._effective_size]
         elif self.spec == "2006":
             self.sub_dir = f"run/run_base_{self._effective_size}_{self.ext}.0000"
         else:
@@ -303,12 +307,27 @@ class Runner:
         if (self.spec == "2000" and self._effective_size == "test"
                 and benchmark == "172.mgrid"):
             return 1.0
-        with open(self._reftime_path(benchmark)) as f:
-            line_idx = 0 if self.spec == "2017" else 1
-            parts = f.readlines()[line_idx].strip().split()
-        if self.spec == "2017" and self._effective_size == "refrate":
-            assert parts[0] == "refrate"
-        return float(parts[-1])
+        reftime_path = self._reftime_path(benchmark)
+        try:
+            with open(reftime_path) as f:
+                line_idx = 0 if self.spec == "2017" else 1
+                lines = f.readlines()
+                if line_idx >= len(lines):
+                    raise ValueError(
+                        f"reftime file too short: {reftime_path} "
+                        f"(need line {line_idx + 1}, got {len(lines)} lines)")
+                parts = lines[line_idx].strip().split()
+            if self.spec == "2017" and self._effective_size == "refrate":
+                if not parts or parts[0] != "refrate":
+                    raise ValueError(
+                        f"expected 'refrate' prefix in {reftime_path}, "
+                        f"got: {parts}")
+            if not parts:
+                raise ValueError(f"empty reftime line in {reftime_path}")
+            return float(parts[-1])
+        except (OSError, ValueError, IndexError) as e:
+            raise RuntimeError(
+                f"cannot read reftime for {benchmark}: {e}") from e
 
     def _intfp_prefix(self, benchmark):
         if not self.intfp:
@@ -339,22 +358,28 @@ class Runner:
         logs = []
         index = 0
         for line in lines:
+            line = line.rstrip('\n\r')
+            # Skip empty lines, comments, and end-of-file markers
+            if not line or not line.strip() or line.startswith('#') or line.strip() == '__END__':
+                continue
             if any(line.startswith(p) for p in self.speccmd_ignore_prefix):
                 continue
             index += 1
-            cmd_args = line[:-1].split(" ")
+            cmd_args = line.split(" ")
             i = 0
             stdin = stdout = stderr = ""
             while i < len(cmd_args):
-                if cmd_args[i] == "-i":
+                if cmd_args[i] == "-i" and i + 1 < len(cmd_args):
                     stdin = cmd_args[i + 1]; i += 2
-                elif cmd_args[i] == "-o":
+                elif cmd_args[i] == "-o" and i + 1 < len(cmd_args):
                     stdout = cmd_args[i + 1]; i += 2
-                elif cmd_args[i] == "-e":
+                elif cmd_args[i] == "-e" and i + 1 < len(cmd_args):
                     stderr = cmd_args[i + 1]; i += 2
                 else:
                     break
             cmd = " ".join(cmd_args[i:])
+            if not cmd.strip():
+                continue  # skip lines that produced no command
             if self.spec == "2017":
                 # 2017 appends shell redirections (< in > out 2>> err) after
                 # the real command.  Strip them from the right; the -o/-e
@@ -362,6 +387,8 @@ class Runner:
                 cmd = re.sub(r'\s+(?:[12]?>>?|<)\s*\S+(?:\s+(?:[12]?>>?|<)\s*\S+)*\s*$', '', cmd)
             if self.exe_dir:
                 cmd_sp = cmd.strip().split()
+                if not cmd_sp:
+                    continue
                 basename = os.path.basename(cmd_sp[0])
                 if "_base" in basename:
                     benchname = basename[:basename.find("_base")]
@@ -369,8 +396,12 @@ class Runner:
                     benchname = basename[:basename.find("_peak")]
                 else:
                     raise RuntimeError(f"{basename} has not _base and _peak")
-                realpath_exe = glob.glob(os.path.join(
-                    self.exe_dir, benchname + "*"))[0]
+                matches = glob.glob(os.path.join(
+                    self.exe_dir, benchname + "*"))
+                if not matches:
+                    raise FileNotFoundError(
+                        f"no exe found for '{benchname}' in {self.exe_dir}")
+                realpath_exe = matches[0]
                 if self.copy_exe:
                     shutil.copy2(realpath_exe,
                                  os.path.dirname(speccmds_filename))
@@ -436,7 +467,7 @@ class Runner:
         begin = time.time()
         exit_code = 0
         for cmd in cmds:
-            full_cmd = f"cd {work_dir} && {cmd}"
+            full_cmd = f"cd {shlex.quote(work_dir)} && {cmd}"
             if self.dry_run or self.verbose:
                 print(full_cmd)
             if not self.dry_run:
@@ -527,7 +558,7 @@ class Runner:
                 "logs": logs, "cmds": cmds, "work_dir": work_dir,
             }
             for idx, c in enumerate(cmds, 1):
-                all_tasks.append((b, work_dir, c, f"cd {work_dir} && {c}", idx))
+                all_tasks.append((b, work_dir, c, f"cd {shlex.quote(work_dir)} && {c}", idx))
 
         # The h264 2-pass workaround from the original: run pass-2 after
         # pass-1 succeeds. Preserved as-is.
@@ -599,7 +630,7 @@ class Runner:
     def _geomean_from_ratios(ratios):
         if not ratios:
             return None
-        return reduce(lambda x, y: x * y, ratios) ** (1.0 / len(ratios))
+        return math.exp(sum(math.log(r) for r in ratios) / len(ratios))
 
     def _score_groups(self, results):
         int_results = [r for r in results if r["name"] in self.CINT]
@@ -645,9 +676,17 @@ class Runner:
                      f"for SPEC {self.spec}")
             print(f"[!] {error}", file=sys.stderr)
         elif self.threads == 1:
-            results = self._run_st(selected)
+            try:
+                results = self._run_st(selected)
+            except (FileNotFoundError, RuntimeError) as e:
+                error = str(e)
+                print(f"[!] {error}", file=sys.stderr)
         else:
-            results = self._run_mt(selected)
+            try:
+                results = self._run_mt(selected)
+            except (FileNotFoundError, RuntimeError) as e:
+                error = str(e)
+                print(f"[!] {error}", file=sys.stderr)
 
         if results and not self.dry_run:
             ratios = self._valid_ratios(results)
