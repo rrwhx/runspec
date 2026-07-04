@@ -356,11 +356,10 @@ class Runner:
                     break
             cmd = " ".join(cmd_args[i:])
             if self.spec == "2017":
-                # 2017 appends `< in > out 2>> err` to the command line; strip.
-                for j in range(len(cmd)):
-                    if cmd[j] in ('>', '<', '2>>'):
-                        cmd = cmd[:j]
-                        break
+                # 2017 appends shell redirections (< in > out 2>> err) after
+                # the real command.  Strip them from the right; the -o/-e
+                # directives already captured stdout/stderr paths above.
+                cmd = re.sub(r'\s+(?:[12]?>>?|<)\s*\S+(?:\s+(?:[12]?>>?|<)\s*\S+)*\s*$', '', cmd)
             if self.exe_dir:
                 cmd_sp = cmd.strip().split()
                 basename = os.path.basename(cmd_sp[0])
@@ -434,27 +433,22 @@ class Runner:
             benchmark, os.path.join(work_dir, "speccmds.cmd"))
         reftime = self._get_reftime(benchmark)
 
-        # Save+restore cwd so callers don't inherit the benchmark's run dir.
-        original_cwd = os.getcwd()
-        os.chdir(work_dir)
         begin = time.time()
         exit_code = 0
-        try:
-            for cmd in cmds:
-                if self.dry_run or self.verbose:
-                    print(f"cd {work_dir} && {cmd}")
-                if not self.dry_run:
-                    r = os.system(cmd)
-                    rc = _waitstatus_to_rc(r)
-                    if rc:
-                        print(f"error {benchmark}, return value:{r}")
-                        print(f"work_dir {work_dir}")
-                        print(f"cmd {cmd}")
-                        exit_code = rc
-                        if not self.loose:
-                            break
-        finally:
-            os.chdir(original_cwd)
+        for cmd in cmds:
+            full_cmd = f"cd {work_dir} && {cmd}"
+            if self.dry_run or self.verbose:
+                print(full_cmd)
+            if not self.dry_run:
+                r = os.system(full_cmd)
+                rc = _waitstatus_to_rc(r)
+                if rc:
+                    print(f"error {benchmark}, return value:{r}")
+                    print(f"work_dir {work_dir}")
+                    print(f"cmd {cmd}")
+                    exit_code = rc
+                    if not self.loose:
+                        break
         runtime = time.time() - begin
         ratio = (reftime / runtime) if runtime > 0 else float("nan")
         return {
