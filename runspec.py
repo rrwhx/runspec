@@ -197,7 +197,7 @@ class Runner:
                  title="test_title",
                  stamp="time",
                  result_dir=None,
-                 copy_exe=False,
+                 copy_exe=True,
                  dup_exe=False,
                  slimit=2048,
                  match_substring=False):
@@ -791,8 +791,8 @@ def _make_parser():
                         "~/runspec_result")
     p.add_argument('--dir', default=".")
     p.add_argument('--exe', default="", help="spec cpu exe dir")
-    p.add_argument('--copy_exe', action="store_true",
-                   help="copy exe to run dir, used for perlbench test")
+    p.add_argument('--no_copy_exe', action="store_true",
+                   help="do not copy exe to run dir (default: copy when --exe is used)")
     p.add_argument('--dup_exe', action='store_true',
                    help="dup argv[0], used for some bt")
     p.add_argument('--slimit', type=int, default=2048,
@@ -817,7 +817,7 @@ def _cli():
             dry_run=args.dry_run, verbose=args.verbose,
             intfp=args.intfp, cmd_prefix=args.cmd_prefix,
             title=args.title, stamp=args.stamp,
-            result_dir=args.result_dir, copy_exe=args.copy_exe,
+            result_dir=args.result_dir, copy_exe=not args.no_copy_exe,
             dup_exe=args.dup_exe, slimit=args.slimit,
             match_substring=args.match_substring,
         )
