@@ -20,7 +20,9 @@ detect_spec_version() {
         echo "2000"
     elif [ -d "benchspec/CPU2006/" ]; then
         echo "2006"
-    elif [ -d "benchspec/CPU/" ]; then
+    elif [ -d "benchspec/CPU/706.stockfish_r/" ]; then
+        echo "2026"
+    elif [ -d "benchspec/CPU/500.perlbench_r/" ]; then
         echo "2017"
     else
         echo -e "${RED}ERROR: Not a valid SPEC CPU directory${NC}" >&2
@@ -43,7 +45,7 @@ show_usage() {
         "2000"|"2006")
             echo -e "  ${YELLOW}4. Benchmark type${NC}: ${CYAN}int${NC}, ${CYAN}fp${NC}, or ${CYAN}all${NC}"
             ;;
-        "2017")
+        "2017"|"2026")
             echo -e "  ${YELLOW}4. Benchmark type${NC}: ${CYAN}intrate${NC}, ${CYAN}fprate${NC}, or ${CYAN}specrate${NC}"
             ;;
     esac
@@ -86,6 +88,17 @@ print_benchmark_list() {
             echo "  503.bwaves_r 507.cactuBSSN_r 508.namd_r 510.parest_r"
             echo "  511.povray_r 519.lbm_r 521.wrf_r 526.blender_r 527.cam4_r"
             echo "  538.imagick_r 544.nab_r 549.fotonik3d_r 554.roms_r"
+            ;;
+        "2026")
+            echo -e "${YELLOW}SPECrate Integer Suite:${NC}"
+            echo "  706.stockfish_r 707.ntest_r 708.sqlite_r 710.omnetpp_r"
+            echo "  714.cpython_r 721.gcc_r 723.llvm_r 727.cppcheck_r"
+            echo "  729.abc_r 734.vpr_r 735.gem5_r 750.sealcrypto_r"
+            echo "  753.ns3_r 777.zstd_r"
+            echo -e "\n${YELLOW}SPECrate Floating Point Suite:${NC}"
+            echo "  709.cactus_r 722.palm_r 731.astcenc_r 736.ocio_r"
+            echo "  737.gmsh_r 748.flightdm_r 749.fotonik3d_r 765.roms_r"
+            echo "  766.femflow_r 767.nest_r 772.marian_r 782.lbm_r"
             ;;
     esac
 }
