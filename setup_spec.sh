@@ -17,7 +17,10 @@ then
 elif [ -d "${SPEC}/benchspec/CPU2006/" ]
 then
     spec="2006"
-elif [ -d "${SPEC}/benchspec/CPU/" ]
+elif [ -d "${SPEC}/benchspec/CPU/706.stockfish_r/" ]
+then
+    spec="2026"
+elif [ -d "${SPEC}/benchspec/CPU/500.perlbench_r/" ]
 then
     spec="2017"
 else
@@ -41,6 +44,11 @@ then
     ./run.sh $1 train 1 all -a setup
     ./run.sh $1 ref   1 all -a setup
 elif [[ "$spec" == "2017" ]]
+then
+    ./run.sh $1 test  1 -T base -a setup specrate
+    ./run.sh $1 train 1 -T base -a setup specrate
+    ./run.sh $1 ref   1 -T base -a setup specrate
+elif [[ "$spec" == "2026" ]]
 then
     ./run.sh $1 test  1 -T base -a setup specrate
     ./run.sh $1 train 1 -T base -a setup specrate
