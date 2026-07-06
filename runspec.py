@@ -199,7 +199,7 @@ class Runner:
                  result_dir=None,
                  copy_exe=False,
                  dup_exe=False,
-                 slimit=-1,
+                 slimit=2048,
                  match_substring=False):
         self.spec_dir = os.path.abspath(dir)
         self.exe_dir = os.path.abspath(exe) if exe else ""
@@ -795,9 +795,9 @@ def _make_parser():
                    help="copy exe to run dir, used for perlbench test")
     p.add_argument('--dup_exe', action='store_true',
                    help="dup argv[0], used for some bt")
-    p.add_argument('--slimit', type=int, default=-1,
+    p.add_argument('--slimit', type=int, default=2048,
                    help="The limit of the stack size, 0 ulimited, or a "
-                        "number(MB), default: not modified")
+                        "number(MB), default: 2048MB")
     p.add_argument('--match-substring', dest='match_substring',
                    action='store_true',
                    help="legacy substring match for -b (default: exact / "
