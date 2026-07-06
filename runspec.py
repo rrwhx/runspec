@@ -120,7 +120,7 @@ def _detect_spec_version(spec_dir):
 def _detect_ext(spec_dir):
     exes = glob.glob(os.path.join(spec_dir, "benchspec/*/*/run/run_*.0000"))
     names = {os.path.basename(p) for p in exes}
-    return {n.removesuffix(".0000").split("_", maxsplit=3)[-1] for n in names}
+    return {n[:-len(".0000")].split("_", maxsplit=3)[-1] for n in names}
 
 
 def _matches(query, candidate, substring=False):
