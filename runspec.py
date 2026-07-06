@@ -764,7 +764,7 @@ def _make_parser():
             "setup(06,17), "),
         formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument('-i', '--size', default="test",
-                   choices=['test', 'train', 'ref', 'refrate'])
+                   choices=['test', 'train', 'ref'])
     p.add_argument('-b', '--benchmark', default="all",
                    help="benchmark selection, all/int/fp, comma separated items")
     p.add_argument('-T', '--tune', default="base", choices=['base', 'peak'])
