@@ -70,7 +70,7 @@ _SPEC_LAYOUTS = {
                           "453.povray", "470.lbm", "482.sphinx3"],
     },
     "2017": {
-        "marker": "benchspec/CPU",
+        "marker": "benchspec/CPU/500.perlbench_r",
         "base_subdir": "benchspec/CPU",
         "ignore_prefix": ["-E", "-r", "-N", "-C", "-u", "-b", "-S"],
         "CINT": ["500.perlbench_r", "502.gcc_r", "505.mcf_r", "520.omnetpp_r",
@@ -86,6 +86,26 @@ _SPEC_LAYOUTS = {
         "FP_NO_FORTRAN":  ["508.namd_r", "510.parest_r", "511.povray_r",
                            "519.lbm_r", "526.blender_r", "538.imagick_r",
                            "544.nab_r"],
+    },
+    "2026": {
+        "marker": "benchspec/CPU/706.stockfish_r",
+        "base_subdir": "benchspec/CPU",
+        "ignore_prefix": ["-E", "-r", "-N", "-C", "-u", "-b", "-S"],
+        "CINT": ["706.stockfish_r", "707.ntest_r", "708.sqlite_r",
+                 "710.omnetpp_r", "714.cpython_r", "721.gcc_r", "723.llvm_r",
+                 "727.cppcheck_r", "729.abc_r", "734.vpr_r", "735.gem5_r",
+                 "750.sealcrypto_r", "753.ns3_r", "777.zstd_r"],
+        "CFP":  ["709.cactus_r", "722.palm_r", "731.astcenc_r", "736.ocio_r",
+                 "737.gmsh_r", "748.flightdm_r", "749.fotonik3d_r", "765.roms_r",
+                 "766.femflow_r", "767.nest_r", "772.marian_r", "782.lbm_r"],
+        "INT_NO_FORTRAN": ["706.stockfish_r", "707.ntest_r", "708.sqlite_r",
+                           "710.omnetpp_r", "714.cpython_r", "721.gcc_r",
+                           "723.llvm_r", "727.cppcheck_r", "729.abc_r",
+                           "734.vpr_r", "735.gem5_r", "750.sealcrypto_r",
+                           "753.ns3_r", "777.zstd_r"],
+        "FP_NO_FORTRAN":  ["709.cactus_r", "731.astcenc_r", "736.ocio_r",
+                           "737.gmsh_r", "748.flightdm_r", "766.femflow_r",
+                           "767.nest_r", "772.marian_r", "782.lbm_r"],
     },
 }
 
@@ -236,7 +256,7 @@ class Runner:
         # Internal "effective" size: 2017 lays out refrate dirs even when the
         # user says -i ref. log_dir keeps the user's spelling.
         self._effective_size = ("refrate"
-                                if self.spec == "2017" and self.size == "ref"
+                                if self.spec in ("2017", "2026") and self.size == "ref"
                                 else self.size)
 
         if self.spec == "2000":
@@ -250,7 +270,7 @@ class Runner:
             self.sub_dir = _size_map_2000[self._effective_size]
         elif self.spec == "2006":
             self.sub_dir = f"run/run_base_{self._effective_size}_{self.ext}.0000"
-        else:
+        else:  # 2017, 2026
             self.sub_dir = (f"run/run_{self.tune}_{self._effective_size}_"
                             f"{self.ext}.0000")
 
@@ -310,14 +330,14 @@ class Runner:
         reftime_path = self._reftime_path(benchmark)
         try:
             with open(reftime_path) as f:
-                line_idx = 0 if self.spec == "2017" else 1
+                line_idx = 0 if self.spec in ("2017", "2026") else 1
                 lines = f.readlines()
                 if line_idx >= len(lines):
                     raise ValueError(
                         f"reftime file too short: {reftime_path} "
                         f"(need line {line_idx + 1}, got {len(lines)} lines)")
                 parts = lines[line_idx].strip().split()
-            if self.spec == "2017" and self._effective_size == "refrate":
+            if self.spec in ("2017", "2026") and self._effective_size == "refrate":
                 if not parts or parts[0] != "refrate":
                     raise ValueError(
                         f"expected 'refrate' prefix in {reftime_path}, "
@@ -380,10 +400,10 @@ class Runner:
             cmd = " ".join(cmd_args[i:])
             if not cmd.strip():
                 continue  # skip lines that produced no command
-            if self.spec == "2017":
-                # 2017 appends shell redirections (< in > out 2>> err) after
-                # the real command.  Strip them from the right; the -o/-e
-                # directives already captured stdout/stderr paths above.
+            if self.spec in ("2017", "2026"):
+                # 2017/2026 appends shell redirections (< in > out 2>> err)
+                # after the real command.  Strip them from the right; the
+                # -o/-e directives already captured stdout/stderr paths above.
                 cmd = re.sub(r'\s+(?:[12]?>>?|<)\s*\S+(?:\s+(?:[12]?>>?|<)\s*\S+)*\s*$', '', cmd)
             if self.exe_dir:
                 cmd_sp = cmd.strip().split()
@@ -392,12 +412,14 @@ class Runner:
                 basename = os.path.basename(cmd_sp[0])
                 if "_base" in basename:
                     benchname = basename[:basename.find("_base")]
+                    glob_pattern = benchname + "_base*"
                 elif "_peak" in basename:
                     benchname = basename[:basename.find("_peak")]
+                    glob_pattern = benchname + "_peak*"
                 else:
                     raise RuntimeError(f"{basename} has not _base and _peak")
                 matches = glob.glob(os.path.join(
-                    self.exe_dir, benchname + "*"))
+                    self.exe_dir, glob_pattern))
                 if not matches:
                     raise FileNotFoundError(
                         f"no exe found for '{benchname}' in {self.exe_dir}")
