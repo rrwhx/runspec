@@ -582,15 +582,18 @@ class Runner:
             for idx, c in enumerate(cmds, 1):
                 all_tasks.append((b, work_dir, c, f"cd {shlex.quote(work_dir)} && {c}", idx))
 
-        # The h264 2-pass workaround from the original: run pass-2 after
-        # pass-1 succeeds. Preserved as-is.
-        h264_1 = ("--pass 1 --stats x264_stats.log --bitrate 1000 --frames 1000"
-                  " -o BuckBunny_New.264 BuckBunny.yuv 1280x720")
+        # The original h264 two-pass workaround (run pass-2 only after pass-1
+        # succeeds) is removed: the environments in use manually rewrite the
+        # x264 input/output so both passes are independent and can run in
+        # parallel.  If the raw two-pass dependency pattern is still present,
+        # error out instead of silently producing wrong results.
         h264_2 = ("--pass 2 --stats x264_stats.log --bitrate 1000 --dumpyuv 200"
                   " --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720")
-        tasks_a = [t for t in all_tasks if h264_2 not in t[3]]
         if any(h264_2 in t[3] for t in all_tasks):
-            print("detected h264_2_2017")
+            raise RuntimeError(
+                "detected h264 two-pass dependency (--pass 2 ...); this build "
+                "needs the sequential pass-1/pass-2 workaround which has been "
+                "removed. Use a run dir with independent input/output.")
 
         def _run(task_tuple):
             _, _, _, task_str, _ = task_tuple
@@ -600,7 +603,7 @@ class Runner:
 
         failures = []
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
-            futures = {executor.submit(_run, t): t for t in tasks_a}
+            futures = {executor.submit(_run, t): t for t in all_tasks}
             while futures:
                 done = next(as_completed(futures))
                 task_tuple = futures.pop(done)
@@ -618,12 +621,6 @@ class Runner:
                         failures.append((b, idx, task_str))
                     else:
                         print(f"[{now}] SUCCESS: {b} #{idx}")
-                    if h264_1 in task_str and not rc:
-                        h264_2_task_str = task_str.replace(h264_1, h264_2)
-                        follow = (b, work_dir, h264_2,
-                                  h264_2_task_str, idx + 1)
-                        futures[executor.submit(_run, follow)] = follow
-                        print("2017 : Submitted h264_2 after h264_1")
                 except Exception as e:
                     print(f"FAIL: {b} #{idx}  exception: {e}")
                     failures.append((b, idx, task_str))
