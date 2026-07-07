@@ -225,8 +225,7 @@ class Runner:
             self.threads = 1
 
         if not os.path.exists(self.spec_dir):
-            raise FileNotFoundError(
-                f"cannot open `{self.spec_dir}' (No such file or directory)")
+            raise FileNotFoundError(f"cannot open `{self.spec_dir}' (No such file or directory)")
 
         self.spec = _detect_spec_version(self.spec_dir)
         if self.spec is None:
@@ -248,43 +247,34 @@ class Runner:
         if not self.ext and self.spec != "2000":
             exts = _detect_ext(self.spec_dir)
             if len(exts) != 1:
-                raise RuntimeError(
-                    "--ext was not specified, and auto probe failed "
-                    f"(found: {sorted(exts)})")
+                raise RuntimeError(f"--ext was not specified, and auto probe failed (found: {sorted(exts)})")
             self.ext = next(iter(exts))
 
         # Internal "effective" size: 2017 lays out refrate dirs even when the
         # user says -i ref. log_dir keeps the user's spelling.
-        self._effective_size = ("refrate"
-                                if self.spec in ("2017", "2026") and self.size == "ref"
-                                else self.size)
+        self._effective_size = ("refrate" if self.spec in ("2017", "2026") and self.size == "ref" else self.size)
 
         if self.spec == "2000":
             _size_map_2000 = {"test": "run/00000001",
                               "train": "run/00000002",
                               "ref": "run/00000003"}
             if self._effective_size not in _size_map_2000:
-                raise ValueError(
-                    f"size '{self.size}' is not valid for SPEC 2000 "
-                    f"(choose from: test, train, ref)")
+                raise ValueError(f"size '{self.size}' is not valid for SPEC 2000 (choose from: test, train, ref)")
             self.sub_dir = _size_map_2000[self._effective_size]
         elif self.spec == "2006":
             self.sub_dir = f"run/run_base_{self._effective_size}_{self.ext}.0000"
         else:  # 2017, 2026
-            self.sub_dir = (f"run/run_{self.tune}_{self._effective_size}_"
-                            f"{self.ext}.0000")
+            self.sub_dir = f"run/run_{self.tune}_{self._effective_size}_{self.ext}.0000"
 
         if result_dir is None:
             result_dir = os.path.expanduser("~") + "/runspec_result"
         self.result_dir = result_dir
         os.makedirs(self.result_dir, exist_ok=True)
 
-        self.stamp = (datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-                      if stamp == "time" else stamp)
+        self.stamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if stamp == "time" else stamp
         # Preserves the original log_dir spelling (user-supplied size, not
         # the remapped one) so existing wrappers find the same path.
-        self.log_dir = (f"{self.result_dir}/{self.title}_{self.spec}_"
-                        f"{self.size}_{self.stamp}")
+        self.log_dir = f"{self.result_dir}/{self.title}_{self.spec}_{self.size}_{self.stamp}"
         self.csv_path = self.log_dir + ".csv"
         self.json_path = self.log_dir + ".json"
 
@@ -304,8 +294,7 @@ class Runner:
 
     def _apply_slimit(self):
         if self.slimit == 0:
-            resource.setrlimit(resource.RLIMIT_STACK,
-                               (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+            resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
         elif self.slimit > 0:
             n = self.slimit << 20
             resource.setrlimit(resource.RLIMIT_STACK, (n, n))
@@ -316,16 +305,13 @@ class Runner:
         return ""
 
     def _work_dir(self, benchmark):
-        return os.path.join(self.base_dir, self._dir_prefix(benchmark),
-                            benchmark, self.sub_dir)
+        return os.path.join(self.base_dir, self._dir_prefix(benchmark), benchmark, self.sub_dir)
 
     def _reftime_path(self, benchmark):
-        return os.path.join(self.base_dir, self._dir_prefix(benchmark),
-                            benchmark, f"data/{self._effective_size}/reftime")
+        return os.path.join(self.base_dir, self._dir_prefix(benchmark), benchmark, f"data/{self._effective_size}/reftime")
 
     def _get_reftime(self, benchmark):
-        if (self.spec == "2000" and self._effective_size == "test"
-                and benchmark == "172.mgrid"):
+        if (self.spec == "2000" and self._effective_size == "test" and benchmark == "172.mgrid"):
             return 1.0
         reftime_path = self._reftime_path(benchmark)
         try:
@@ -333,21 +319,16 @@ class Runner:
                 line_idx = 0 if self.spec in ("2017", "2026") else 1
                 lines = f.readlines()
                 if line_idx >= len(lines):
-                    raise ValueError(
-                        f"reftime file too short: {reftime_path} "
-                        f"(need line {line_idx + 1}, got {len(lines)} lines)")
+                    raise ValueError(f"reftime file too short: {reftime_path} (need line {line_idx + 1}, got {len(lines)} lines)")
                 parts = lines[line_idx].strip().split()
             if self.spec in ("2017", "2026") and self._effective_size == "refrate":
                 if not parts or parts[0] != "refrate":
-                    raise ValueError(
-                        f"expected 'refrate' prefix in {reftime_path}, "
-                        f"got: {parts}")
+                    raise ValueError(f"expected 'refrate' prefix in {reftime_path}, got: {parts}")
             if not parts:
                 raise ValueError(f"empty reftime line in {reftime_path}")
             return float(parts[-1])
         except (OSError, ValueError, IndexError) as e:
-            raise RuntimeError(
-                f"cannot read reftime for {benchmark}: {e}") from e
+            raise RuntimeError(f"cannot read reftime for {benchmark}: {e}") from e
 
     def _intfp_prefix(self, benchmark):
         if not self.intfp:
@@ -358,8 +339,7 @@ class Runner:
         return "int" if benchmark in self.CINT else "xfp"
 
     def _log_path(self, benchmark, index):
-        return (f"{self.log_dir}/{self._intfp_prefix(benchmark)}"
-                f"{benchmark}_{index}{self.suffix}")
+        return f"{self.log_dir}/{self._intfp_prefix(benchmark)}{benchmark}_{index}{self.suffix}"
 
     def _build_prefix(self, logfile):
         if self.pre_argv is not None:
@@ -418,17 +398,13 @@ class Runner:
                     glob_pattern = benchname + "_peak*"
                 else:
                     raise RuntimeError(f"{basename} has not _base and _peak")
-                matches = glob.glob(os.path.join(
-                    self.exe_dir, glob_pattern))
+                matches = glob.glob(os.path.join(self.exe_dir, glob_pattern))
                 if not matches:
-                    raise FileNotFoundError(
-                        f"no exe found for '{benchname}' in {self.exe_dir}")
+                    raise FileNotFoundError(f"no exe found for '{benchname}' in {self.exe_dir}")
                 realpath_exe = matches[0]
                 if self.copy_exe:
-                    shutil.copy2(realpath_exe,
-                                 os.path.dirname(speccmds_filename))
-                    cmd = " ".join(["./" + os.path.basename(realpath_exe)]
-                                   + cmd_sp[1:])
+                    shutil.copy2(realpath_exe, os.path.dirname(speccmds_filename))
+                    cmd = " ".join(["./" + os.path.basename(realpath_exe)] + cmd_sp[1:])
                 else:
                     cmd = " ".join([realpath_exe] + cmd_sp[1:])
             if self.dup_exe:
@@ -482,8 +458,7 @@ class Runner:
         work_dir = self._work_dir(benchmark)
         if not os.path.exists(work_dir):
             raise FileNotFoundError(f"{work_dir} not existed")
-        cmds, logs = self._build_cmds(
-            benchmark, os.path.join(work_dir, "speccmds.cmd"))
+        cmds, logs = self._build_cmds(benchmark, os.path.join(work_dir, "speccmds.cmd"))
         reftime = self._get_reftime(benchmark)
 
         begin = time.time()
@@ -529,8 +504,7 @@ class Runner:
                 r = self.run_single(b)
                 results.append(r)
                 if not self.dry_run:
-                    print("%20s\t%.1f\t%.3f\t%.3f" %
-                          (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                    print("%20s\t%.1f\t%.3f\t%.3f" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
                 if r["exit_code"] and not self.loose:
                     return results
 
@@ -547,8 +521,7 @@ class Runner:
                 r = self.run_single(b)
                 results.append(r)
                 if not self.dry_run:
-                    print("%20s\t%.1f\t%.3f\t%.3f" %
-                          (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                    print("%20s\t%.1f\t%.3f\t%.3f" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
                 if r["exit_code"] and not self.loose:
                     return results
 
@@ -570,8 +543,7 @@ class Runner:
             work_dir = self._work_dir(b)
             if not os.path.exists(work_dir):
                 raise FileNotFoundError(f"{work_dir} not existed")
-            cmds, logs = self._build_cmds(
-                b, os.path.join(work_dir, "speccmds.cmd"))
+            cmds, logs = self._build_cmds(b, os.path.join(work_dir, "speccmds.cmd"))
             reftime = self._get_reftime(b)
             bench_info[b] = {
                 "name": b, "score_type": self._score_type(b),
@@ -587,8 +559,7 @@ class Runner:
         # x264 input/output so both passes are independent and can run in
         # parallel.  If the raw two-pass dependency pattern is still present,
         # error out instead of silently producing wrong results.
-        h264_2 = ("--pass 2 --stats x264_stats.log --bitrate 1000 --dumpyuv 200"
-                  " --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720")
+        h264_2 = "--pass 2 --stats x264_stats.log --bitrate 1000 --dumpyuv 200 --frames 1000 -o BuckBunny_New.264 BuckBunny.yuv 1280x720"
         if any(h264_2 in t[3] for t in all_tasks):
             raise RuntimeError(
                 "detected h264 two-pass dependency (--pass 2 ...); this build "
@@ -642,9 +613,7 @@ class Runner:
     @staticmethod
     def _valid_ratios(results):
         return [r["ratio"] for r in results
-                if r["ratio"] is not None
-                and not math.isnan(r["ratio"])
-                and r["ratio"] > 0]
+                if r["ratio"] is not None and not math.isnan(r["ratio"]) and r["ratio"] > 0]
 
     @staticmethod
     def _geomean_from_ratios(ratios):
@@ -670,10 +639,8 @@ class Runner:
                 for r in group_results:
                     if r["reftime"] is None or r["runtime"] is None:
                         continue
-                    f.write("%s,%f,%f,%f\n" % (r["name"], r["reftime"],
-                                                r["runtime"], r["ratio"]))
-                group_geomean = self._geomean_from_ratios(
-                    self._valid_ratios(group_results))
+                    f.write("%s,%f,%f,%f\n" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                group_geomean = self._geomean_from_ratios(self._valid_ratios(group_results))
                 if group_geomean is not None:
                     f.write("score,,,%s\n" % group_geomean)
 
@@ -692,8 +659,7 @@ class Runner:
         error = None
 
         if not selected:
-            error = (f"no benchmarks matched -b {self.benchmark_arg!r} "
-                     f"for SPEC {self.spec}")
+            error = f"no benchmarks matched -b {self.benchmark_arg!r} for SPEC {self.spec}"
             print(f"[!] {error}", file=sys.stderr)
         elif self.threads == 1:
             try:
@@ -754,12 +720,9 @@ class Runner:
 
 def _make_parser():
     p = argparse.ArgumentParser(
-        description=(
-            "Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, "
-            "strace, time), get log or performance,\n"
-            "Spec run directory should be prepared carefully,\n"
-            "Run test, train and ref in spec directory(00), or just -a "
-            "setup(06,17), "),
+        description=("Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,\n"
+                     "Spec run directory should be prepared carefully,\n"
+                     "Run test, train and ref in spec directory(00), or just -a setup(06,17,26), "),
         formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument('-i', '--size', default="test",
                    choices=['test', 'train', 'ref'])
@@ -785,8 +748,7 @@ def _make_parser():
     p.add_argument('--stamp', default="time")
     p.add_argument('--result_dir',
                    default=os.path.expanduser('~') + '/runspec_result',
-                   help="location of cmd_prefix logs, defaults to "
-                        "~/runspec_result")
+                   help="location of cmd_prefix logs, defaults to ~/runspec_result")
     p.add_argument('--dir', default=".")
     p.add_argument('--exe', default="", help="spec cpu exe dir")
     p.add_argument('--no_copy_exe', action="store_true",
@@ -794,12 +756,10 @@ def _make_parser():
     p.add_argument('--dup_exe', action='store_true',
                    help="dup argv[0], used for some bt")
     p.add_argument('--slimit', type=int, default=2048,
-                   help="The limit of the stack size, 0 ulimited, or a "
-                        "number(MB), default: 2048MB")
+                   help="The limit of the stack size, 0 ulimited, or a number(MB), default: 2048MB")
     p.add_argument('--match-substring', dest='match_substring',
                    action='store_true',
-                   help="legacy substring match for -b (default: exact / "
-                        "prefix / numeric-id)")
+                   help="legacy substring match for -b (default: exact / prefix / numeric-id)")
     return p
 
 
