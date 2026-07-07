@@ -612,11 +612,12 @@ class Runner:
                         bench_info[b]["runtime"] += elapsed
                         if rc:
                             bench_info[b]["exit_code"] = rc
+                    now = datetime.now().strftime("%m-%d %H:%M:%S")
                     if rc:
-                        print(f"FAIL: {b} #{idx}  {task_str}")
+                        print(f"[{now}] FAIL: {b} #{idx}  {task_str}")
                         failures.append((b, idx, task_str))
                     else:
-                        print(f"SUCCESS: {b} #{idx}")
+                        print(f"[{now}] SUCCESS: {b} #{idx}")
                     if h264_1 in task_str and not rc:
                         h264_2_task_str = task_str.replace(h264_1, h264_2)
                         follow = (b, work_dir, h264_2,
