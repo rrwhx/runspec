@@ -20,9 +20,15 @@ fi
 
 echo ${suffix_list[@]}
 
+# 所有 exe 目录统一收纳到该上层输出目录下
+output_root="./exes"
+mkdir -p "$output_root"
+
 # 遍历所有suffix
 for suffix in "${suffix_list[@]}"; do
-    target_dir="./${suffix}"
+    # 目录名去掉前导下划线（base/peak 开头），但匹配仍用完整 suffix
+    # 在 output_root 下再建一层，各个 exe 目录归于其中
+    target_dir="${output_root}/${suffix#_}"
 
     # 创建目标目录
     mkdir -p "$target_dir"
