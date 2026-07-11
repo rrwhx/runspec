@@ -32,6 +32,8 @@ import re
 import resource
 import shlex
 import shutil
+import signal
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -153,6 +155,31 @@ def _waitstatus_to_rc(r):
         return r
 
 
+def _run_shell(cmd, timeout=None):
+    """Run cmd via the shell; return a normalized exit code (0 == success).
+
+    When timeout (seconds) is set and exceeded, the whole process group is
+    killed and 124 is returned (matching the GNU ``timeout`` convention).
+    Without a timeout the behaviour is identical to the previous os.system().
+    """
+    if not timeout or timeout <= 0:
+        return _waitstatus_to_rc(os.system(cmd))
+    # start_new_session makes proc the leader of a fresh session and process
+    # group whose pgid == proc.pid, so the whole subtree can be signalled via
+    # killpg(proc.pid, ...) without a getpgid() race on the leader's exit.
+    proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
+        print(f"[timeout] killed process group after {timeout}s: {cmd}", file=sys.stderr)
+        return 124
+
+
 def _json_safe(obj):
     if isinstance(obj, float):
         if math.isnan(obj) or math.isinf(obj):
@@ -200,7 +227,8 @@ class Runner:
                  copy_exe=True,
                  dup_exe=False,
                  slimit=2048,
-                 match_substring=False):
+                 match_substring=False,
+                 timeout=None):
         self.spec_dir = os.path.abspath(dir)
         self.exe_dir = os.path.abspath(exe) if exe else ""
         self.benchmark_arg = benchmark
@@ -220,6 +248,7 @@ class Runner:
         self.dup_exe = dup_exe
         self.slimit = slimit
         self.match_substring = match_substring
+        self.timeout = timeout
 
         if self.dry_run:
             self.threads = 1
@@ -468,10 +497,9 @@ class Runner:
             if self.dry_run or self.verbose:
                 print(full_cmd)
             if not self.dry_run:
-                r = os.system(full_cmd)
-                rc = _waitstatus_to_rc(r)
+                rc = _run_shell(full_cmd, self.timeout)
                 if rc:
-                    print(f"error {benchmark}, return value:{r}")
+                    print(f"error {benchmark}, return value:{rc}")
                     print(f"work_dir {work_dir}")
                     print(f"cmd {cmd}")
                     exit_code = rc
@@ -569,8 +597,8 @@ class Runner:
         def _run(task_tuple):
             _, _, _, task_str, _ = task_tuple
             t0 = time.time()
-            r = os.system(task_str)
-            return r, time.time() - t0
+            rc = _run_shell(task_str, self.timeout)
+            return rc, time.time() - t0
 
         failures = []
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
@@ -580,8 +608,7 @@ class Runner:
                 task_tuple = futures.pop(done)
                 b, work_dir, _c, task_str, idx = task_tuple
                 try:
-                    r, elapsed = done.result()
-                    rc = _waitstatus_to_rc(r)
+                    rc, elapsed = done.result()
                     if b in bench_info:
                         bench_info[b]["runtime"] += elapsed
                         if rc:
@@ -757,6 +784,8 @@ def _make_parser():
                    help="dup argv[0], used for some bt")
     p.add_argument('--slimit', type=int, default=2048,
                    help="The limit of the stack size, 0 ulimited, or a number(MB), default: 2048MB")
+    p.add_argument('--timeout', type=float, default=None,
+                   help="max seconds per command; on timeout the process group is killed (rc=124). default: unlimited")
     p.add_argument('--match-substring', dest='match_substring',
                    action='store_true',
                    help="legacy substring match for -b (default: exact / prefix / numeric-id)")
@@ -777,7 +806,7 @@ def _cli():
             title=args.title, stamp=args.stamp,
             result_dir=args.result_dir, copy_exe=not args.no_copy_exe,
             dup_exe=args.dup_exe, slimit=args.slimit,
-            match_substring=args.match_substring,
+            match_substring=args.match_substring, timeout=args.timeout,
         )
     except (FileNotFoundError, ValueError, RuntimeError) as e:
         print(str(e))
