@@ -12,7 +12,7 @@ shopt -s nullglob
 
 # 如果第一个参数是all，则获取所有suffix
 if [ "$1" = "all" ]; then
-    suffix_list=( $(ls benchspec/*/999.specrand*/exe/ | grep -E "_((base)|(peak)).*" -o | sort | uniq) )
+    suffix_list=( $(ls benchspec/*/*/exe/ | grep -E "_((base)|(peak)).*" -o | sort | uniq) )
 else
     # 否则使用传入的所有参数作为suffix列表
     suffix_list=("$@")
