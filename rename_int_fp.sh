@@ -1,17 +1,9 @@
 #!/bin/bash
 # Source: https://github.com/rrwhx/runspec
 
-# 检查是否提供了目录参数
-if [ $# -ne 1 ]; then
-    echo "用法: $0 <目录路径>"
-    exit 1
-fi
-
-target_dir="$1"
-
-# 检查目录是否存在
-if [ ! -d "$target_dir" ]; then
-    echo "错误: 目录 '$target_dir' 不存在"
+# 检查是否提供了参数
+if [ $# -lt 1 ]; then
+    echo "用法: $0 <目录或文件> [目录或文件...]"
     exit 1
 fi
 
@@ -20,9 +12,10 @@ int_keywords=("164.gzip" "175.vpr" "176.gcc" "181.mcf" "186.crafty" "197.parser"
 fp_keywords=("168.wupwise" "171.swim" "172.mgrid" "173.applu" "177.mesa" "178.galgel" "179.art" "183.equake" "187.facerec" "188.ammp" "189.lucas" "191.fma3d" "200.sixtrack" "301.apsi" "410.bwaves" "416.gamess" "433.milc" "434.zeusmp" "435.gromacs" "436.cactusADM" "437.leslie3d" "444.namd" "447.dealII" "450.soplex" "453.povray" "454.calculix" "459.GemsFDTD" "465.tonto" "470.lbm" "481.wrf" "482.sphinx3" "503.bwaves_r" "507.cactuBSSN_r" "508.namd_r" "510.parest_r" "511.povray_r" "519.lbm_r" "521.wrf_r" "526.blender_r" "527.cam4_r" "538.imagick_r" "544.nab_r" "549.fotonik3d_r" "554.roms_r" "709.cactus_r" "722.palm_r" "731.astcenc_r" "736.ocio_r" "737.gmsh_r" "748.flightdm_r" "749.fotonik3d_r" "765.roms_r" "766.femflow_r" "767.nest_r" "772.marian_r" "782.lbm_r")
 
 
-# 遍历目标目录下的所有文件
-find "$target_dir" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' file; do
-    # 获取文件名（不含路径）
+# 对单个文件进行重命名处理
+process_file() {
+    local file="$1"
+    local filename dirpath keyword new_filename
     filename=$(basename "$file")
     dirpath=$(dirname "$file")
 
@@ -35,20 +28,32 @@ find "$target_dir" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' file; 
                 mv -- "$file" "$dirpath/$new_filename"
                 echo "重命名: $file -> $dirpath/$new_filename"
             fi
-            # 匹配后跳出当前循环
-            continue 2
+            return
         fi
     done
 
     # 检查文件名是否包含fp关键字
     for keyword in "${fp_keywords[@]}"; do
         if [[ "$filename" == *"$keyword"* ]]; then
-            if [[ "$filename" != fp_* ]]; then
-                new_filename="fp_$filename"
+            if [[ "$filename" != xfp_* ]]; then
+                new_filename="xfp_$filename"
                 mv -- "$file" "$dirpath/$new_filename"
                 echo "重命名: $file -> $dirpath/$new_filename"
             fi
-            continue 2
+            return
         fi
     done
+}
+
+# 遍历所有参数：目录则处理其下的文件，文件则直接处理
+for target in "$@"; do
+    if [ -d "$target" ]; then
+        while IFS= read -r -d '' file; do
+            process_file "$file"
+        done < <(find "$target" -maxdepth 1 -type f -print0)
+    elif [ -f "$target" ]; then
+        process_file "$target"
+    else
+        echo "警告: '$target' 不是目录或文件，跳过" >&2
+    fi
 done
