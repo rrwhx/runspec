@@ -218,7 +218,7 @@ class Runner:
                  loose=False,
                  dry_run=False,
                  verbose=False,
-                 intfp=False,
+                 intfp=True,
                  cmd_prefix="",
                  pre_argv=None,
                  title="test_title",
@@ -767,7 +767,10 @@ def _make_parser():
                    help="Don't actually run any cmd; just print them.")
     p.add_argument('-v', '--verbose', action='store_true',
                    help="Print cmd before exec cmd")
-    p.add_argument('--intfp', action='store_true', help="intfp prefix")
+    p.add_argument('--intfp', dest='intfp', action='store_true', default=True,
+                   help="intfp prefix (default: on; use --no-intfp to disable)")
+    p.add_argument('--no-intfp', dest='intfp', action='store_false',
+                   help="disable intfp prefix")
     p.add_argument('-c', '--cmd_prefix', default='',
                    help=(r'cmd prefix before real cmd, %%s for output, '
                          r'eg: -c "perf stat -o %%s "'))

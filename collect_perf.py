@@ -118,7 +118,7 @@ def main():
     result_file = sys.stdout
 
     try:
-        result_file.write("benchmark," + ','.join(event_list) + '\n')
+        result_file.write("benchmark," + ','.join(e.replace(' ', '_') for e in event_list) + '\n')
         for item, data in data_dict.items():
             row = [item]
             for event in event_list:
