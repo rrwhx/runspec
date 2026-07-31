@@ -2,21 +2,25 @@
 # Source: https://github.com/rrwhx/runspec
 """Combine selected columns from several CSV files side by side.
 
-Argument grammar (comma form only):
+Argument grammar (space-separated tokens only):
 
-    file,col[,col...]                 one file, one or more columns
-    file1,file2,...,col[,col...]      several files sharing the same columns
+    file [file...] col [col...]  [file [file...] col [col...]] ...
 
-Each command-line token is one self-contained group. Within a token each
-comma-separated part is classified independently: parts that parse as
-integers are column indices, everything else is a file name. Order within
-the token does not matter; all files in a token share all its columns.
+Each token is classified independently: tokens that parse as integers
+are column indices, everything else is a file name. A run of file names
+followed by a run of column indices forms one group; all files in the
+group share all its columns. A file name appearing after columns starts
+a new group. Shell globs therefore work directly::
+
+    combine_csv.py *.csv 1 2
+    combine_csv.py a_*.csv 1 b_*.csv 2 3
+
 Examples::
 
-    a.csv,1,2          -> file a.csv, columns 1 and 2
-    a.csv,b.csv,1,2    -> files a.csv and b.csv, both columns 1 and 2
-    a.csv,1,b.csv,2    -> files a.csv and b.csv, both columns 1 and 2
-    a.csv,-1           -> file a.csv, last column (Python-style negative)
+    a.csv 1 2          -> file a.csv, columns 1 and 2
+    a.csv b.csv 1 2    -> files a.csv and b.csv, both columns 1 and 2
+    a.csv 1 b.csv 2    -> two groups: a.csv column 1, b.csv column 2
+    a.csv -- -1        -> file a.csv, last column (Python-style negative)
 
 Column indices are 0-based and support Python-style negative indices
 (``-1`` is the last column). Rows shorter than requested are padded
@@ -30,35 +34,37 @@ import os
 import sys
 
 
-def parse_token(tok):
-    """Parse one token into (files, cols).
+def parse_items(tokens):
+    """Classify space-separated tokens into (files, cols) groups.
 
-    Each comma-separated part is classified independently: parts that parse
-    as integers are column indices, everything else is a file name. Order
-    within the token does not matter; all files share all columns.
+    Integer tokens are column indices, everything else is a file name.
+    A run of files followed by a run of columns is one group; a file
+    after columns starts a new group.
     """
-    parts = tok.split(",")
-    if len(parts) < 2:
-        raise ValueError(f"参数格式错误 '{tok}': 需要 file,col 或 file1,file2,...,col 形式")
-
+    groups = []
     files = []
     cols = []
-    for part in parts:
+    for tok in tokens:
         try:
-            cols.append(int(part))
+            col = int(tok)
         except ValueError:
-            files.append(part)
-
-    if not files:
-        raise ValueError(f"参数格式错误 '{tok}': 缺少文件名")
-    if not cols:
-        raise ValueError(f"参数格式错误 '{tok}': 缺少列索引")
-    return files, cols
-
-
-def parse_items(items):
-    """Parse all tokens into a list of (files, cols) groups."""
-    return [parse_token(tok) for tok in items]
+            col = None
+        if col is None:
+            if cols:
+                groups.append((files, cols))
+                files, cols = [], []
+            files.append(tok)
+        else:
+            if not files:
+                raise ValueError(f"列索引 {tok} 前缺少文件名")
+            cols.append(col)
+    if files:
+        if not cols:
+            raise ValueError(f"文件 {' '.join(files)} 后缺少列索引")
+        groups.append((files, cols))
+    if not groups:
+        raise ValueError("缺少输入文件")
+    return groups
 
 
 def read_csv_columns(filename, col_indices):
@@ -129,24 +135,33 @@ def _make_parser():
         description="Combine selected columns from several CSV files side by side.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Token grammar: file,col[,col...]  or  file1,file2,...,col[,col...]\n\n"
+            "Argument grammar (space-separated tokens only):\n"
+            "  file [file...] col [col...]  [file [file...] col [col...]] ...\n\n"
+            "Integer tokens are column indices, everything else is a file name.\n"
+            "A run of files followed by a run of columns is one group; all files\n"
+            "in a group share all its columns. A file after columns starts a new\n"
+            "group, so shell globs work directly.\n\n"
+            "Column indices are 0-based; negative indices count from the end\n"
+            "(-1 is the last column). Use '--' before a leading negative index.\n\n"
             "Examples:\n"
             "  # one file, columns 1 and 2 (0-based); header + stdout (default)\n"
-            "  python combine_csv.py a.csv,1,2 > out.csv\n\n"
-            "  # several files sharing one column set\n"
-            "  python combine_csv.py a.csv,b.csv,1,2 c.csv,0 > out.csv\n\n"
+            "  python combine_csv.py a.csv 1 2 > out.csv\n\n"
+            "  # shell glob friendly\n"
+            "  python combine_csv.py *.csv 1 2 > out.csv\n\n"
+            "  # different columns per glob segment\n"
+            "  python combine_csv.py a_*.csv 1 b_*.csv 2 3 > out.csv\n\n"
             "  # last column of each file via negative index\n"
-            "  python combine_csv.py a.csv,-1 b.csv,-1 > out.csv\n\n"
+            "  python combine_csv.py *.csv -1 > out.csv\n\n"
             "  # no header, write to a file instead of stdout\n"
-            "  python combine_csv.py --no-header -o out.csv a.csv,1,2 b.csv,2\n"
+            "  python combine_csv.py --no-header -o out.csv a.csv 1 2 b.csv 2\n"
         ),
     )
     p.add_argument("--no-header", action="store_true",
                    help="do not emit the auto-generated header row")
     p.add_argument("-o", "--output", default=None,
                    help="write to this file instead of stdout")
-    p.add_argument("items", nargs="+",
-                   help="one or more 'file,col[,col...]' tokens")
+    p.add_argument("items", nargs="+", metavar="file|col",
+                   help="file names and 0-based column indices, space separated")
     return p
 
 

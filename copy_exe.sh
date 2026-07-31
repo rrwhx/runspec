@@ -20,8 +20,8 @@ fi
 
 echo ${suffix_list[@]}
 
-# 所有 exe 目录统一收纳到该上层输出目录下
-output_root="./exes"
+# 所有 exe 目录统一收纳到该上层输出目录下（以当前目录名加 _exe 后缀命名）
+output_root="./$(basename "$PWD")_exe"
 mkdir -p "$output_root"
 
 # 遍历所有suffix
