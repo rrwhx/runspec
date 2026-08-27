@@ -111,13 +111,17 @@ if args.reduce2:
     # Second reduce by group
     groups = {}
     for k, v in r_reduced.items():
-        parts = k.split("-", 1)
-        if len(parts) > 1:
-            group_name = parts[0]
-            sub_name = parts[1]
+        if k.startswith("int_") or k.startswith("xfp_"):
+            group_name = k[:3]
+            sub_name = k[4:]
         else:
-            group_name = "all"
-            sub_name = k
+            parts = k.split("-", 1)
+            if len(parts) > 1:
+                group_name = parts[0]
+                sub_name = parts[1]
+            else:
+                group_name = "all"
+                sub_name = k
 
         if group_name not in groups:
             groups[group_name] = []

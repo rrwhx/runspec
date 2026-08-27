@@ -73,6 +73,8 @@ def main():
     parser = argparse.ArgumentParser(description="Collect perf output", formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('inputs', nargs='+', help="Input directory or files containing perf output")
     parser.add_argument('-e', '--event', default="", help="Comma-separated list of events to extract (default: all)")
+    parser.add_argument('-s', '--sort', action='store_true', default=False,
+                        help="sort input files by name (default: keep input/directory order)")
     args = parser.parse_args()
 
     print(f"Arguments: {args}", file=sys.stderr)
@@ -92,7 +94,8 @@ def main():
         print("Error: No valid input files found.", file=sys.stderr)
         sys.exit(1)
 
-    file_list.sort()
+    if args.sort:
+        file_list.sort()
     print(f"Files to process: {file_list}", file=sys.stderr)
 
     data_dict = {}

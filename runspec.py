@@ -362,7 +362,7 @@ class Runner:
     def _intfp_prefix(self, benchmark):
         if not self.intfp:
             return ""
-        return self._score_type(benchmark) + "-"
+        return self._score_type(benchmark) + "_"
 
     def _score_type(self, benchmark):
         return "int" if benchmark in self.CINT else "xfp"
