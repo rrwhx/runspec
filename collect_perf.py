@@ -75,6 +75,9 @@ def main():
     parser.add_argument('-e', '--event', default="", help="Comma-separated list of events to extract (default: all)")
     parser.add_argument('-s', '--sort', action='store_true', default=False,
                         help="sort input files by name (default: keep input/directory order)")
+    parser.add_argument('-d', '--dir-key', dest='dir_key', action='store_true', default=False,
+                        help="prefix key with the immediate directory name (dir-file),\n"
+                             "avoids same file name in different dirs overwriting each other")
     args = parser.parse_args()
 
     print(f"Arguments: {args}", file=sys.stderr)
@@ -103,6 +106,10 @@ def main():
 
     for filename in file_list:
         item = os.path.basename(filename).rstrip(".txt").rstrip(".log")
+        if args.dir_key:
+            dirname = os.path.basename(os.path.dirname(os.path.abspath(filename)))
+            if dirname:
+                item = f"{dirname}-{item}"
         data = parse_perf_file(filename)
         data_dict[item] = data
 
