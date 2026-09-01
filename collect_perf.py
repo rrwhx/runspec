@@ -3,6 +3,7 @@
 import sys
 import os
 import argparse
+import fnmatch
 import re
 
 def parse_perf_file(filename):
@@ -73,6 +74,12 @@ def main():
     parser = argparse.ArgumentParser(description="Collect perf output", formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('inputs', nargs='+', help="Input directory or files containing perf output")
     parser.add_argument('-e', '--event', default="", help="Comma-separated list of events to extract (default: all)")
+    parser.add_argument('-m', '--event-match', dest='event_match', default="exact",
+                        choices=['exact', 'glob', 'regex'],
+                        help="how -e/--event items are matched (default: exact)\n"
+                             "exact: literal names, a missing one still yields an empty column\n"
+                             "glob : shell wildcards, eg -e '*cache*,branch*' -m glob\n"
+                             "regex: python re.search, eg -e 'cache|^branch' -m regex")
     parser.add_argument('-s', '--sort', action='store_true', default=False,
                         help="sort input files by name (default: keep input/directory order)")
     parser.add_argument('-d', '--dir-key', dest='dir_key', action='store_true', default=False,
@@ -118,7 +125,26 @@ def main():
                 all_events.append(event)
 
     if args.event:
-        event_list = args.event.split(",")
+        patterns = args.event.split(",")
+        if args.event_match == "exact":
+            event_list = patterns
+        else:
+            event_list = []
+            for pat in patterns:
+                if args.event_match == "glob":
+                    matched = [e for e in all_events if fnmatch.fnmatchcase(e, pat)]
+                else:
+                    try:
+                        regex = re.compile(pat)
+                    except re.error as e:
+                        print(f"Error: invalid regex '{pat}': {e}", file=sys.stderr)
+                        sys.exit(1)
+                    matched = [e for e in all_events if regex.search(e)]
+                if not matched:
+                    print(f"Warning: no event matched '{pat}'", file=sys.stderr)
+                for e in matched:
+                    if e not in event_list:
+                        event_list.append(e)
     else:
         event_list = all_events
 
