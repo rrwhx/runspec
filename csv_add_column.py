@@ -183,43 +183,43 @@ def create_parser():
 示例用法:
 
 1. 基本数学运算（第一行作为数据）:
-   python add_column.py data.csv "c0 + c1"
+   python csv_add_column.py data.csv "c0 + c1"
    # 将第0列和第1列相加，结果作为新列
 
 2. 指定新列名（第一行作为header）:
-   python add_column.py data.csv "c1 + c2" --column-name "总分"
+   python csv_add_column.py data.csv "c1 + c2" --column-name "总分"
    # 将第1列和第2列相加，新列名为"总分"
 
 3. 复杂数学表达式:
-   python add_column.py sales.csv "c1 * 0.1 + c2 * 0.05" --column-name "佣金"
+   python csv_add_column.py sales.csv "c1 * 0.1 + c2 * 0.05" --column-name "佣金"
    # 计算佣金：销售额*10% + 奖金*5%
 
 4. 条件表达式:
-   python add_column.py grades.csv "c1 if c1 >= 60 else 0" --column-name "及格分数"
+   python csv_add_column.py grades.csv "c1 if c1 >= 60 else 0" --column-name "及格分数"
    # 如果分数>=60则保持原分数，否则为0
 
 5. 使用内置函数:
-   python add_column.py data.csv "max(c0, c1, c2)" --column-name "最大值"
+   python csv_add_column.py data.csv "max(c0, c1, c2)" --column-name "最大值"
    # 取前三列的最大值
 
 6. 字符串长度计算:
-   python add_column.py names.csv "len(str(c0))" --column-name "姓名长度"
+   python csv_add_column.py names.csv "len(str(c0))" --column-name "姓名长度"
    # 计算第0列字符串的长度
 
 7. 四舍五入:
-   python add_column.py prices.csv "round(c0 * 1.13, 2)" --column-name "含税价格"
+   python csv_add_column.py prices.csv "round(c0 * 1.13, 2)" --column-name "含税价格"
    # 计算含税价格并保留2位小数
 
 8. 多条件判断:
-   python add_column.py scores.csv "('优秀' if c0 >= 90 else '良好' if c0 >= 80 else '及格' if c0 >= 60 else '不及格')" --column-name "等级"
+   python csv_add_column.py scores.csv "('优秀' if c0 >= 90 else '良好' if c0 >= 80 else '及格' if c0 >= 60 else '不及格')" --column-name "等级"
    # 根据分数划分等级
 
 9. 就地编辑（直接修改源文件）:
-   python add_column.py data.csv "c0 * 1.1" --column-name "调整后价格" --in-place
+   python csv_add_column.py data.csv "c0 * 1.1" --column-name "调整后价格" --in-place
    # 直接修改源文件，添加新列
 
 10. 输出到指定文件:
-    python add_column.py input.csv "c1 + c2" --column-name "总计" --output output.csv
+    python csv_add_column.py input.csv "c1 + c2" --column-name "总计" --output output.csv
     # 将结果保存到新文件
 
 列引用说明:

@@ -7,12 +7,17 @@ import math
 import statistics
 
 
-parser = argparse.ArgumentParser(description ="aollect perf output", formatter_class=argparse.RawTextHelpFormatter)
+parser = argparse.ArgumentParser(description="Reduce CSV rows (e.g. from collect_perf.py): first reduce the\n"
+                                 "rows of each benchmark, then reduce benchmarks inside each group.",
+                                 formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('input', help="Input CSV file")
-parser.add_argument('-o', '--output', default="result.csv")
-parser.add_argument('-e', '--event',  default="instructions,branches")
-parser.add_argument('-r', '--reduce',  default="sum", help="arithmetic(mean)、geometric、harmonic(hmean)、median、sum、product、max、min")
-parser.add_argument('-r2', '--reduce2', default="mean", help="Second reduce method for groups, default: mean")
+parser.add_argument('-o', '--output', default="result.csv", help="Output CSV file (default: result.csv)")
+parser.add_argument('-e', '--event',  default="instructions,branches", help="reserved, default: instructions,branches")
+parser.add_argument('-r', '--reduce',  default="sum",
+                    help="per-benchmark reduce method (default: sum):\n"
+                         "arithmetic(mean), geometric, harmonic(hmean),\n"
+                         "median, sum, product, max, min")
+parser.add_argument('-r2', '--reduce2', default="mean", help="per-group reduce method, same choices as -r (default: mean)")
 args = parser.parse_args()
 
 
@@ -72,13 +77,14 @@ methods = {
 def my_reduce(method, nums):
 
     if method not in methods:
-        print(f"不支持的方法 '{method}'。请选择: arithmetic, geometric, harmonic, median, sum, product, max, min.", file=sys.stderr)
+        print(f"Error: unsupported method '{method}', "
+              "choose from: arithmetic, geometric, harmonic, median, sum, product, max, min.", file=sys.stderr)
         exit(1)
 
     try:
         result = methods[method](nums)
     except Exception as e:
-        print(f"计算时出现错误: {e}", file=sys.stderr)
+        print(f"Error: reduction failed: {e}", file=sys.stderr)
         result = None
     return result
 

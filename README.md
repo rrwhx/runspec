@@ -11,6 +11,33 @@ Source: https://github.com/rrwhx/runspec
 
 ` git clone https://github.com/rrwhx/runspec `
 
+## 仓库结构
+
+```
+runspec/
+├── runspec.py          # 核心:在 SPEC 命令前加前缀运行,收集日志/性能数据
+├── run.sh              # SPEC 目录内的运行/构建入口(需 cp 到 spec_root)
+├── templates/          # 各版本/负载的静态命令脚本(生成物,非手写逻辑)
+│   └── cpu2000_*.sh, cpu2006_*.sh, cpu2017_*_rate.sh, cpu2026_*_rate.sh
+├── env/                # 环境准备与维护
+│   ├── setup_spec.sh       # 建立 test/train/ref run 目录
+│   ├── clean_spec.sh       # 清理 run 目录
+│   ├── copy_exe.sh         # 导出各 bench 的可执行文件
+│   └── rename_int_fp.sh    # int_/xfp_ 前缀重命名
+├── collect_perf.py       # perf stat 输出 → CSV
+├── collect_score.py      # SPEC 结果 log → score CSV(含 GMEAN)
+├── collect_disassemble.sh  # 批量 objdump benchspec 下的可执行文件
+├── collect_disassemble.py  # 反汇编辅助(交叉工具链)
+├── csv_merge.py          # 水平/纵向拼接多个 CSV
+├── csv_combine.py        # 选取列并排合并
+├── csv_add_column.py     # 按表达式添加派生列
+└── csv_reduce.py         # 按 benchmark/分组聚合(sum/mean/geomean 等)
+```
+
+约定:
+- 采集/处理类脚本均为 数据 → stdout,日志/警告 → stderr,可用管道直接串联。
+- 新脚本按职能命名:采集用 `collect_` 前缀,CSV 处理用 `csv_` 前缀,生成物入 `templates/`,环境脚本入 `env/`。
+
 ## 预先准备
 
 编译好的spec cpu目录
@@ -22,8 +49,7 @@ Source: https://github.com/rrwhx/runspec
 保证 run 目录下生成三个文件夹分别对应`test train ref`
 ```bash
 cd <spec_root>
-cp run.sh .
-cp setup_spec.sh .
+cp run.sh env/setup_spec.sh .
 ./run.sh <config_file> test 1 all
 # cpu 2017
 # ./run.sh <config_file> test 1 intrate fprate -T base
