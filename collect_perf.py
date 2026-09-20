@@ -6,24 +6,15 @@ import argparse
 import fnmatch
 import re
 
-def parse_perf_file(filename):
-    """Parse a single perf output file and return a dictionary of events."""
+CMDLINE_RE = re.compile(r"Performance counter stats for ['\"](.*)['\"]\s*:")
+
+def parse_perf_lines(lines):
+    """Parse one perf stat section and return a dictionary of events."""
     data = {}
 
-    # Step 1: Read all lines from the file
-    with open(filename, "r") as f:
-        lines = f.readlines()
-
-    # Step 2: Process the lines
-    started = not any("Performance counter stats for" in line for line in lines)
     for line in lines:
         line = line.strip()
         if not line:
-            continue
-        if line.startswith("Performance counter stats for"):
-            started = True
-            continue
-        if not started:
             continue
 
         if "seconds time elapsed" in line:
@@ -70,6 +61,59 @@ def parse_perf_file(filename):
                         pass
     return data
 
+def parse_perf_file(filename):
+    """Parse a single perf output file, return a list of (cmdline, events),
+    one item per 'Performance counter stats for' section."""
+    with open(filename, "r") as f:
+        lines = f.readlines()
+
+    sections = []   # (cmdline, section_lines)
+    cmdline = None
+    cur_lines = []
+    seen_marker = False
+    for line in lines:
+        m = CMDLINE_RE.search(line)
+        if m:
+            if seen_marker:
+                sections.append((cmdline, cur_lines))
+            seen_marker = True
+            cmdline = m.group(1)
+            cur_lines = []
+        else:
+            cur_lines.append(line)
+    if seen_marker:
+        sections.append((cmdline, cur_lines))
+    else:
+        # no marker at all: treat the whole file as one section
+        sections.append((None, lines))
+
+    return [(cmd, parse_perf_lines(sec_lines)) for cmd, sec_lines in sections]
+
+def strip_ext(name):
+    """Remove a single .txt/.log suffix (unlike rstrip, which strips chars)."""
+    for suf in (".txt", ".log"):
+        if name.endswith(suf):
+            return name[:-len(suf)]
+    return name
+
+def shorten_prog_name(prog):
+    """'./perlbench_r_base.x86_64.gcc16.O3.generic' -> 'perlbench_r'."""
+    name = os.path.basename(prog)
+    m = re.match(r'^(.*?)(?:_base|_peak)\..*$', name)
+    if m:
+        return m.group(1)
+    return name
+
+def cmd_to_key(cmdline, with_args=False):
+    """Derive a benchmark key from the perf 'stats for' command line."""
+    parts = cmdline.split()
+    if not parts:
+        return ""
+    key = shorten_prog_name(parts[0])
+    if with_args and len(parts) > 1:
+        key = key + "_" + "_".join(parts[1:])
+    return key.replace(",", ";")
+
 def main():
     parser = argparse.ArgumentParser(description="Collect perf output", formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('inputs', nargs='+', help="Input directory or files containing perf output")
@@ -84,7 +128,16 @@ def main():
                         help="sort input files by name (default: keep input/directory order)")
     parser.add_argument('-d', '--dir-key', dest='dir_key', action='store_true', default=False,
                         help="prefix key with the immediate directory name (dir-file),\n"
-                             "avoids same file name in different dirs overwriting each other")
+                             "keeps same file name in different dirs as separate rows\n"
+                             "(default: records with the same key are merged into one row)")
+    parser.add_argument('-k', '--key', dest='key', default='file',
+                        choices=['file', 'cmd', 'cmdargs'],
+                        help="how to derive the benchmark key of each record (default: file)\n"
+                             "file   : file name without .txt/.log extension\n"
+                             "cmd    : program name of the \"Performance counter stats for '<cmd>'\"\n"
+                             "         line, SPEC style '_base.'/'_peak.' suffixes stripped\n"
+                             "cmdargs: like cmd, plus the program arguments\n"
+                             "cmd/cmdargs fall back to the file name if no command line is found")
     args = parser.parse_args()
 
     print(f"Arguments: {args}", file=sys.stderr)
@@ -110,19 +163,45 @@ def main():
 
     data_dict = {}
     all_events = []
+    merge_conflicts = 0
+    TIME_EVENTS = {"seconds time elapsed", "seconds user", "seconds sys"}
 
-    for filename in file_list:
-        item = os.path.basename(filename).rstrip(".txt").rstrip(".log")
-        if args.dir_key:
-            dirname = os.path.basename(os.path.dirname(os.path.abspath(filename)))
-            if dirname:
-                item = f"{dirname}-{item}"
-        data = parse_perf_file(filename)
-        data_dict[item] = data
-
-        for event in data.keys():
+    def register_events(events):
+        for event in events:
             if event not in all_events:
                 all_events.append(event)
+
+    for filename in file_list:
+        for cmdline, data in parse_perf_file(filename):
+            if not data:
+                print(f"Warning: no perf events found in '{filename}', skipped.", file=sys.stderr)
+                continue
+            if args.key != 'file' and cmdline:
+                base = cmd_to_key(cmdline, with_args=(args.key == 'cmdargs'))
+            else:
+                if args.key != 'file' and not cmdline:
+                    print(f"Warning: no command line found in '{filename}', "
+                          "fall back to the file name key.", file=sys.stderr)
+                base = strip_ext(os.path.basename(filename))
+            if args.dir_key:
+                dirname = os.path.basename(os.path.dirname(os.path.abspath(filename)))
+                if dirname:
+                    base = f"{dirname}-{base}"
+
+            if base in data_dict:
+                # same key: same benchmark measured again (e.g. split event sets),
+                # merge into the existing row, the first measured value wins
+                existing = data_dict[base]
+                for ek, ev in data.items():
+                    if ek not in existing:
+                        existing[ek] = ev
+                    elif existing[ek] != ev and ek not in TIME_EVENTS:
+                        # e.g. instructions/cycles measured again in each run
+                        merge_conflicts += 1
+                register_events(data.keys())
+                continue
+            data_dict[base] = data
+            register_events(data.keys())
 
     if args.event:
         patterns = args.event.split(",")
@@ -148,6 +227,9 @@ def main():
     else:
         event_list = all_events
 
+    if merge_conflicts:
+        print(f"Note: {merge_conflicts} conflicting event value(s) ignored during merge, "
+              "the first measured value is kept.", file=sys.stderr)
     print(f"Events to extract: {event_list}", file=sys.stderr)
     # print(f"Extracted data: {data_dict}", file=sys.stderr) # Optional: print all data
 
