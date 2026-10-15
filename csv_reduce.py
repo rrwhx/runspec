@@ -1,157 +1,175 @@
 #!/usr/bin/env python3
-# Source: https://github.com/rrwhx/runspec
-import sys
-import os
+"""Reduce numeric columns per key, optionally adding SPEC group summaries."""
+
 import argparse
+import csv
 import math
+import re
 import statistics
 
+from _csv_common import (
+    add_csv_options,
+    csv_writer,
+    open_input,
+    open_output,
+    parse_args,
+    resolve_columns,
+    run_cli,
+)
 
-parser = argparse.ArgumentParser(description="Reduce CSV rows (e.g. from collect_perf.py): first reduce the\n"
-                                 "rows of each benchmark, then reduce benchmarks inside each group.",
-                                 formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument('input', help="Input CSV file")
-parser.add_argument('-o', '--output', default="result.csv", help="Output CSV file (default: result.csv)")
-parser.add_argument('-e', '--event',  default="instructions,branches", help="reserved, default: instructions,branches")
-parser.add_argument('-r', '--reduce',  default="sum",
-                    help="per-benchmark reduce method (default: sum):\n"
-                         "arithmetic(mean), geometric, harmonic(hmean),\n"
-                         "median, sum, product, max, min")
-parser.add_argument('-r2', '--reduce2', default="mean", help="per-group reduce method, same choices as -r (default: mean)")
-args = parser.parse_args()
+METHODS = (
+    "sum",
+    "mean",
+    "arithmetic",
+    "geometric",
+    "harmonic",
+    "hmean",
+    "median",
+    "product",
+    "max",
+    "min",
+)
 
 
-def arithmetic_mean(nums):
-    """算术平均值（Arithmetic Mean）"""
-    return sum(nums) / len(nums) if nums else None
-
-def geometric_mean(nums):
-    """几何平均值（Geometric Mean）"""
-    if not nums:
-        return None
-    # 注意：几何平均数适用于所有数均为非负的情况
-    product = math.prod(nums)
-    return product ** (1 / len(nums))
-
-def harmonic_mean(nums):
-    """调和平均值（Harmonic Mean）"""
-    # statistics.harmonic_mean 对于包含0的数据可能抛出异常
-    try:
-        return statistics.harmonic_mean(nums)
-    except statistics.StatisticsError as e:
-        return f"Error: {e}"
-
-def median(nums):
-    """中位数（Median）"""
-    return statistics.median(nums)
-
-def summation(nums):
-    """求和（Sum）"""
-    return sum(nums)
-
-def product(nums):
-    """连乘积（Product）"""
-    return math.prod(nums)
-
-def maximum(nums):
-    """最大值（Maximum）"""
-    return max(nums)
-
-def minimum(nums):
-    """最小值（Minimum）"""
-    return min(nums)
-
-methods = {
-    "arithmetic": arithmetic_mean,
-    "mean": arithmetic_mean,
-    "geometric": geometric_mean,
-    "hmean": harmonic_mean,
-    "harmonic": harmonic_mean,
-    "median": median,
-    "sum": summation,
-    "product": product,
-    "max": maximum,
-    "min": minimum,
-}
-
-def my_reduce(method, nums):
-
-    if method not in methods:
-        print(f"Error: unsupported method '{method}', "
-              "choose from: arithmetic, geometric, harmonic, median, sum, product, max, min.", file=sys.stderr)
-        exit(1)
-
-    try:
-        result = methods[method](nums)
-    except Exception as e:
-        print(f"Error: reduction failed: {e}", file=sys.stderr)
-        result = None
+def reduce_values(method, values):
+    if not values:
+        raise ValueError("Cannot reduce an empty set of values")
+    if method == "geometric":
+        if any(value < 0 for value in values):
+            raise ValueError("Geometric mean requires non-negative values")
+        result = 0.0 if 0 in values else math.exp(statistics.fmean(map(math.log, values)))
+    elif method in ("harmonic", "hmean"):
+        if any(value < 0 for value in values):
+            raise ValueError("Harmonic mean requires non-negative values")
+        result = statistics.harmonic_mean(values)
+    elif method in ("mean", "arithmetic"):
+        result = statistics.fmean(values)
+    elif method == "sum":
+        result = math.fsum(values)
+    elif method == "product":
+        result = math.prod(values)
+    elif method == "median":
+        result = statistics.median(values)
+    elif method == "max":
+        result = max(values)
+    elif method == "min":
+        result = min(values)
+    else:
+        raise ValueError(f"Unsupported reduction method: {method}")
+    if not math.isfinite(result):
+        raise ValueError(f"{method} produced a non-finite value")
     return result
 
 
-print(f"Arguments: {args}", file=sys.stderr)
+def group_name(key):
+    if key.startswith(("int_", "xfp_")):
+        return key[:3]
+    return key.split("-", 1)[0] if "-" in key else "all"
 
-result_file = args.input
 
-r = {}
-header = ""
-
-f = open(result_file, "r")
-lines = list(f.readlines())
-if lines:
-    header = lines[0].strip()
-
-for line in lines[1:]:
-    line_sp = line.strip().strip(',').split(",")
-    benchname = line_sp[0].rsplit("_", 1)[0]
-    benchvalues = [float(_) for _ in line_sp[1:]]
-    if benchname not in r:
-        r[benchname] = []
-    r[benchname].append(benchvalues)
-
-r_reduced = {}
-for k,v in r.items():
-    r_reduced[k] = [my_reduce(args.reduce.lower(), x) for x in zip(*v)]
-
-if args.reduce2:
-    # Second reduce by group
+def reduce_rows(reader, key_index, value_indices, width, args):
+    buckets = {}
+    for row in reader:
+        if len(row) != width:
+            raise ValueError(f"Inconsistent row width near input line {reader.line_num}")
+        key = row[key_index]
+        if not key:
+            raise ValueError(f"Empty key near input line {reader.line_num}")
+        if args.key_mode == "spec":
+            key = re.sub(r"_\d+$", "", key)
+        try:
+            values = [float(row[index]) for index in value_indices]
+        except ValueError as exc:
+            raise ValueError(f"Non-numeric value near input line {reader.line_num}") from exc
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"Non-finite value near input line {reader.line_num}")
+        buckets.setdefault(key, []).append(values)
+    reduced = {
+        key: [reduce_values(args.reduce, values) for values in zip(*records)]
+        for key, records in buckets.items()
+    }
+    if args.no_group_summary or args.reduce2 in ("", "none"):
+        return [[key, *values] for key, values in reduced.items()]
     groups = {}
-    for k, v in r_reduced.items():
-        if k.startswith("int_") or k.startswith("xfp_"):
-            group_name = k[:3]
-            sub_name = k[4:]
-        else:
-            parts = k.split("-", 1)
-            if len(parts) > 1:
-                group_name = parts[0]
-                sub_name = parts[1]
-            else:
-                group_name = "all"
-                sub_name = k
+    for key, values in reduced.items():
+        groups.setdefault(group_name(key), []).append((key, values))
+    rows = []
+    for group, items in groups.items():
+        # Keep qualified keys: int_example and xfp_example must remain distinct.
+        rows.extend([key, *values] for key, values in items)
+        summary_name = f"{group}_{args.reduce2}"
+        if summary_name in reduced:
+            raise ValueError(
+                f"Summary key conflicts with a data key: {summary_name}; use --no-group-summary"
+            )
+        values = [
+            reduce_values(args.reduce2, column) for column in zip(*(values for _, values in items))
+        ]
+        rows.append([summary_name, *values])
+    return rows
 
-        if group_name not in groups:
-            groups[group_name] = []
-        groups[group_name].append((sub_name, v))
 
-    final_results = {}
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Example: csv_reduce.py data.csv --key category --key-mode exact -e amount -r geometric --no-group-summary",
+    )
+    parser.add_argument("input", nargs="?", help="Input file; omitted or '-' reads stdin")
+    add_csv_options(parser)
+    parser.add_argument(
+        "--key", default="0", help="Key column name or zero-based index (default: 0)"
+    )
+    parser.add_argument(
+        "--key-mode",
+        choices=("spec", "exact"),
+        default="spec",
+        help="Strip trailing _NUMBER for SPEC runs, or keep exact keys (default: spec)",
+    )
+    parser.add_argument(
+        "-e",
+        "--event",
+        help="Numeric columns by name/index/range, comma-separated (default: all except key)",
+    )
+    parser.add_argument(
+        "-r",
+        "--reduce",
+        type=str.lower,
+        choices=METHODS,
+        default="sum",
+        help="Reduction per key (default: sum)",
+    )
+    parser.add_argument(
+        "-r2",
+        "--reduce2",
+        type=str.lower,
+        choices=METHODS + ("none", ""),
+        default="mean",
+        help="Reduction per SPEC group (default: mean); none disables summaries",
+    )
+    parser.add_argument("--no-group-summary", action="store_true", help="Output per-key rows only")
+    args = parse_args(parser, argv)
+    with open_input(args.input, args.encoding) as source:
+        reader = csv.reader(source, delimiter=args.delimiter, strict=True)
+        header = next(reader, None)
+        if not header:
+            raise ValueError("Input must contain a header")
+        key_indices = resolve_columns(args.key, header, len(header))
+        if len(key_indices) != 1:
+            parser.error("--key must select exactly one column")
+        key_index = key_indices[0]
+        value_indices = (
+            resolve_columns(args.event, header, len(header), ranges=True)
+            if args.event is not None
+            else [index for index in range(len(header)) if index != key_index]
+        )
+        if not value_indices or key_index in value_indices:
+            parser.error("Select at least one numeric column, excluding the key column")
+        result = reduce_rows(reader, key_index, value_indices, len(header), args)
+    with open_output(args.output, args.output_encoding) as output:
+        writer = csv_writer(output, args)
+        writer.writerow([header[key_index], *[header[index] for index in value_indices]])
+        writer.writerows(result)
 
-    for group_name, items in groups.items():
-        group_values = []
-        for sub_name, v in items:
-            final_results[sub_name] = v
-            group_values.append(v)
 
-        if group_values:
-            reduce2_name = f"{group_name}_{args.reduce2.lower()}"
-            final_results[reduce2_name] = [my_reduce(args.reduce2.lower(), x) for x in zip(*group_values)]
-else:
-    final_results = r_reduced
-
-result_filename = args.output
-with open(result_filename, "w") as result_file:
-    if header:
-        result_file.write(header + "\n")
-    for k, v in final_results.items():
-        result_file.write(k + ",")
-        result_file.write(",".join(list(map(str, v))))
-        result_file.write("\n")
+if __name__ == "__main__":
+    raise SystemExit(run_cli(main))

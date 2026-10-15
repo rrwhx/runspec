@@ -1,0 +1,3 @@
+# Dependencies for csv_eval.py, csv_query.py, csv_pivot.py and csv_add_random.py.
+numpy>=1.23
+pandas>=1.5
