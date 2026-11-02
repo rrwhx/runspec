@@ -198,6 +198,24 @@ ruff format --check .
 
 编译好的spec cpu目录
 
+### 导出可执行文件
+
+在 SPEC 根目录运行 `env/copy_exe.sh`（可使用脚本的绝对路径）。不传参数等同于 `all`，
+导出发现的全部 `base/peak` 构建；也可指定一个或多个后缀模式，多个模式取并集。
+
+```bash
+cd <spec_root>
+/path/to/runspec/env/copy_exe.sh                    # 默认 all
+/path/to/runspec/env/copy_exe.sh '_base*'           # 仅 base 构建
+/path/to/runspec/env/copy_exe.sh '*gcc*' '*clang*'   # 指定编译配置
+/path/to/runspec/env/copy_exe.sh '_base.my_config'  # 完整后缀
+```
+
+模式支持 `*`、`?`、`[...]`，请加引号防止 shell 提前展开。匹配对象是从 `_base` 或 `_peak`
+开始的实际后缀，不包括 benchmark 名称；无通配符时仍按文件名末尾匹配。
+结果按实际后缀放到 `<当前目录名>_exe/<去掉首个下划线的后缀>/`，不会用通配符作为目录名。
+任一模式没有匹配时会在复制前报错；`-h` 或 `--help` 显示帮助。
+
 ### 建立run目录
 
 ### 方案 1

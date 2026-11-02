@@ -1,50 +1,91 @@
 #!/bin/bash
 # Source: https://github.com/rrwhx/runspec
 
-# 检查参数是否正确
-if [ $# -eq 0 ]; then
-    echo "Usage: $0 <suffix|all> [suffix2] [suffix3] ..."
-    exit 1
-fi
-
-# 启用nullglob以避免无匹配时字面量扩展
+set -euo pipefail
 shopt -s nullglob
 
-# 如果第一个参数是all，则获取所有suffix
-if [ "$1" = "all" ]; then
-    suffix_list=( $(ls benchspec/*/*/exe/ | grep -E "_((base)|(peak)).*" -o | sort | uniq) )
-else
-    # 否则使用传入的所有参数作为suffix列表
-    suffix_list=("$@")
+usage() {
+    cat <<EOF
+Usage: $0 [all|suffix-pattern ...]
+
+Run from the SPEC root directory. No arguments means all base/peak builds.
+Patterns match suffixes beginning with _base or _peak, not benchmark names.
+Literal suffixes and shell wildcards (*, ?, [...]) are supported.
+Quote patterns to prevent expansion by your shell.
+
+Examples:
+  $0
+  $0 '_base*'
+  $0 '*gcc*' '*clang*'
+  $0 '_base.my_config'
+
+Output: ./<current-directory>_exe/<actual-suffix-without-leading-underscore>/
+EOF
+}
+
+if [[ ${1-} == -h || ${1-} == --help ]]; then
+    usage
+    exit 0
+fi
+if [[ ${1-} == -- ]]; then
+    shift
+fi
+if [[ $# -eq 0 ]]; then
+    set -- all
 fi
 
-echo ${suffix_list[@]}
-
-# 所有 exe 目录统一收纳到该上层输出目录下（以当前目录名加 _exe 后缀命名）
-output_root="./$(basename "$PWD")_exe"
-mkdir -p "$output_root"
-
-# 遍历所有suffix
-for suffix in "${suffix_list[@]}"; do
-    # 目录名去掉前导下划线（base/peak 开头），但匹配仍用完整 suffix
-    # 在 output_root 下再建一层，各个 exe 目录归于其中
-    target_dir="${output_root}/${suffix#_}"
-
-    # 创建目标目录
-    mkdir -p "$target_dir"
-    echo "Processing suffix: $suffix, target directory: $target_dir"
-
-    # 遍历所有匹配的文件
-    for file in benchspec/*/*/exe/*"$suffix"; do
-        # 检查文件是否存在
-        if [ -f "$file" ]; then
-            echo "$file"
-            cp "$file" "${target_dir}/"
-        fi
-    done
+patterns=("$@")
+matched=()
+for pattern in "${patterns[@]}"; do
+    if [[ -z "$pattern" ]]; then
+        printf 'Error: suffix patterns must not be empty.\n' >&2
+        exit 1
+    fi
+    matched+=(0)
 done
 
-# 恢复nullglob
-shopt -u nullglob
+# Discover actual suffixes from filenames; do not parse ls output.
+# Collect the selection before writing, so a typo does not produce partial output.
+selected_files=()
+selected_suffixes=()
+for file in benchspec/*/*/exe/*; do
+    [[ -f "$file" ]] || continue
+    filename=${file##*/}
+    [[ "$filename" =~ (_(base|peak).*)$ ]] || continue
+    suffix=${BASH_REMATCH[1]}
+    selected=0
+    for ((i = 0; i < ${#patterns[@]}; i++)); do
+        pattern=${patterns[i]}
+        # The unquoted RHS enables glob matching; the leading * preserves
+        # the original behavior of accepting a literal trailing suffix.
+        if [[ "$pattern" == all || "$suffix" == *$pattern ]]; then
+            matched[i]=1
+            selected=1
+        fi
+    done
+    if [[ "$selected" -eq 1 ]]; then
+        selected_files+=("$file")
+        selected_suffixes+=("$suffix")
+    fi
+done
 
-echo "处理完成"
+for ((i = 0; i < ${#patterns[@]}; i++)); do
+    if [[ "${matched[i]}" -eq 0 ]]; then
+        printf 'Error: no base/peak executables match suffix pattern %q under benchspec/*/*/exe/. Run from the SPEC root directory.\n' "${patterns[i]}" >&2
+        exit 1
+    fi
+done
+
+output_root="./$(basename "$PWD")_exe"
+for ((i = 0; i < ${#selected_files[@]}; i++)); do
+    file=${selected_files[i]}
+    suffix=${selected_suffixes[i]}
+    target_dir="${output_root}/${suffix#_}"
+    if [[ ! -d "$target_dir" ]]; then
+        mkdir -p "$target_dir"
+    fi
+    printf 'Copying %s -> %s/\n' "$file" "$target_dir"
+    cp "$file" "${target_dir}/"
+done
+
+printf 'Copied %s executables to %s\n' "${#selected_files[@]}" "$output_root"
