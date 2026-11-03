@@ -49,6 +49,23 @@ runspec/
 - 采集/处理类脚本均为 数据 → stdout,日志/警告 → stderr,可用管道直接串联。
 - 新脚本按职能命名:采集用 `collect_` 前缀,CSV 处理用 `csv_` 前缀,生成物入 `templates/`,环境脚本入 `env/`。
 
+## 清理 SPEC 目录
+
+`env/clean_spec.sh` 接受一个或多个目标目录，不传目录时清理当前目录。
+目标（包括默认的当前目录）必须同时包含 `benchspec/`、`config/` 子目录和 `shrc` 文件才会执行清理。
+清理内容包括 `result/`、`tmp/`、`config/*cfg.*`，以及各 benchmark 的
+`run_*/`、`run/`、`build/`。`exe` 可放在目录参数的任意位置，额外清理所有目标的 `exe/`。
+无效目录会报错并跳过，其余目录继续处理；任何清理失败都会返回非零状态。
+脚本输出各目标的清理进度和结果，错误信息写入 stderr。
+
+```bash
+./env/clean_spec.sh                         # 清理当前目录
+./env/clean_spec.sh /path/to/spec            # 清理一个目录
+./env/clean_spec.sh ./spec2006 "./spec 2017" # 清理多个目录
+./env/clean_spec.sh exe ./spec2006 ./spec2017 # 同时清理可执行文件
+./env/clean_spec.sh ./spec2006 exe ./spec2017 # exe 也可放在中间或末尾
+```
+
 ## CSV 数据处理
 
 全部 11 个 `csv_*.py` 工具共用同目录的 `_csv_common.py`，复制到其他位置时需一起复制。
