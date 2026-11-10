@@ -291,7 +291,7 @@ rm -rf benchspec/CPU/*/run/
 
 ```bash
 usage: runspec.py [-h] [-i {test,train,ref,refrate}] [-b BENCHMARK] [-T {base,peak}] [--ext EXT] [--suffix SUFFIX] [-t THREADS] [-l] [-n] [-v] [--intfp] [-c CMD_PREFIX] [--title TITLE]
-                  [--stamp STAMP] [--result_dir RESULT_DIR] [--dir DIR] [--slimit SLIMIT]
+                  [--stamp STAMP] [--result_dir RESULT_DIR] [--dir DIR] [--slimit SLIMIT] [--repeat REPEAT]
 
 Run spec cpu with prefix(none, qemu, perf, pin, dynamorio, strace, time), get log or performance,
 Spec run directory should be prepared carefully,
@@ -307,6 +307,7 @@ options:
   --suffix SUFFIX       suffix of output file
   -t THREADS, --threads THREADS
                         Allow N jobs at once;
+  --repeat REPEAT        Repeat the suite N times and summarize median runtimes (default: 1)
   -l, --loose           ignore errors
   -n, --dry_run         Don't actually run any cmd; just print them.
   -v, --verbose         Print cmd before exec cmd
@@ -320,6 +321,77 @@ options:
   --dir DIR
   --slimit SLIMIT       The limit of the stack size, 0 ulimited, or a number(MB), default: not modified
 ```
+
+### 多轮测试与 CSV 输出
+
+使用 `--repeat N` 连续运行 N 轮（正整数，默认 1）。各轮依次执行，`--threads`
+仍控制一轮内的并发数。每个 benchmark 按成功轮次的完整耗时取中位数，
+再计算 `ratio = reftime / runtime` 和 INT/FP 分组的几何平均分。
+有效轮次为偶数时，中位数取中间两个耗时的平均值。
+
+```bash
+./runspec.py --dir /path/to/spec -i ref -b int --repeat 3 \
+    --result_dir ./results --title repeated
+```
+
+设输出前缀为 `<title>_<spec>_<size>_<stamp>`：
+
+- `<前缀>.csv`：兼容原列结构，无表头，四列为 `benchmark,reftime,runtime,ratio`，
+  保留 INT/FP 分组的 `score` 行。多轮时使用中位数汇总；单轮路径和列结构保持原样。
+- `<前缀>.detail.csv`：有表头，一行一个 benchmark，先列出所有轮次的 runtime，
+  再列出所有轮次的 ratio，最后为 `median_ratio`；单轮也生成，包含
+  `runtime1,ratio1,median_ratio`。每个 INT/FP 分组后都有 `score` 行，
+  各轮分数位于对应的 `ratioN` 列，汇总分数位于 `median_ratio` 列，时间列留空。
+- `<前缀>.json`：保留汇总和 `iterations` 中的各轮原始记录、退出码及日志路径；
+  多轮汇总还记录 `successful_runs`、`failed_runs`、`missing_runs`。
+- 多轮时，`<前缀>/run_001/`、`run_002/` 等目录分别保存该轮的 `result.csv`、
+  `result.json`、命令前缀采集日志，以及启用 `--redirect_stderr` 时的 stderr。
+
+三轮 detail CSV 的列顺序如下，数值按实际执行顺序排列：
+
+```csv
+benchmark,reftime,runtime1,runtime2,runtime3,ratio1,ratio2,ratio3,median_ratio
+400.perlbench,100.0,100.000,25.000,50.000,1.000,4.000,2.000,2.000
+score,,,,,1.000,4.000,2.000,2.000
+```
+
+对应兼容 CSV 的 benchmark 行为 `400.perlbench,100.0,50.000,2.000`。
+`median_ratio` 与兼容 CSV 的 ratio 相同，按 `reftime / 耗时中位数` 计算；
+有效轮次为偶数时，该值可能不同于直接对各轮 ratio 求中位数。
+所有 CSV（汇总、各轮结果和 detail）的 reftime 固定 1 位小数，runtime、ratio
+（包括 `median_ratio`）和 score 固定 3 位小数。仅在输出时舍入，计算过程、JSON
+和 library 返回值保留原始精度。屏幕参考时间保留 1 位，耗时、ratio 和 score 保留 3 位；
+串行和并发模式都打印各轮的 INT/FP 分组分数、总分，多轮时再打印最终中位数汇总分数。
+benchmark 数值和 score 写入 stdout；新增的 `run N/M` 和 `median summary:` 标题写入 stderr。
+失败或未执行的轮次在 detail CSV 中留空，不参与中位数和评分；无有效样本的
+benchmark 不写入兼容 CSV。默认遇错停止，后续轮次留空；`--loose` 继续运行，
+退出码沿用原有忽略错误的语义，失败信息仍保留在 JSON 中。
+
+各轮沿用原 SPEC 工作目录，程序自身生成的文件仍可能覆盖；按轮分目录保存的是
+本工具的结果和采集日志。分开的两次调用仍需使用不同 `--title` 或 `--stamp`
+保留结果；本次未改变同名输出覆盖的行为。
+
+回归测试：`python3 -m unittest discover -s tests -p 'test_runspec.py'`。
+
+### 作为 library 使用
+
+```python
+from runspec import Runner
+
+runner = Runner(dir="/path/to/spec", benchmark="int", repeat=3, slimit=-1)
+result = runner.run()
+print(result["exit_code"], result["csv_path"], result["detail_csv_path"])
+```
+
+导入模块不会解析命令行或启动测试。`run()` 返回结构化结果，由调用者处理
+`exit_code`；退出进程仅发生在 CLI 入口。公开的 `run_single(benchmark)` 调用约定保持原样，
+子类可以继续覆写该方法。
+
+初始化会校验 SPEC 目录并准备输出目录，运行会打印结果并写入报告。
+`slimit` 沿用原有的进程级 stack limit 设置；传入 `slimit=-1` 可保持调用进程的限制不变。
+benchmark 命令在子 shell 中切换工作目录，调用进程的当前目录保持不变。
+配置错误通过异常报告，benchmark 失败记录在返回结果中，报告写入失败可能抛出 `OSError`。
+返回记录保留原有的非有限浮点值表示，写入 JSON 时转换为 `null`。
 
 ### 示例
 

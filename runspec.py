@@ -4,8 +4,9 @@
 
 Two ways to use this module:
 
-* CLI: same flags as before; emits a ``<title>_<spec>_<size>_<stamp>.csv``
-  plus a sibling ``.json`` with the structured run result.
+* CLI: emits a compatible ``<title>_<spec>_<size>_<stamp>.csv``, a wide
+  ``.detail.csv``, and a sibling ``.json`` with the structured run result.
+  ``--repeat N`` repeats the suite and summarizes median benchmark runtimes.
 * As a library::
 
       from runspec import Runner
@@ -22,8 +23,11 @@ Two ways to use this module:
   ``log_dir``, ``csv_path``, ``json_path``, ``benchmarks`` (each with
   ``reftime``, ``runtime``, ``ratio``, ``exit_code``, ``logs``, ``cmds``,
   ``work_dir``), ``geomean``, ``exit_code``.
+  ``repeat``, ``detail_csv_path`` and ``iterations`` describe repeated runs.
+  Non-finite floats in returned records are saved as JSON ``null``.
 """
 import argparse
+import csv
 import glob
 import json
 import math
@@ -33,6 +37,7 @@ import resource
 import shlex
 import shutil
 import signal
+import statistics
 import subprocess
 import sys
 import time
@@ -195,9 +200,16 @@ def _json_safe(obj):
 class Runner:
     """Reusable SPEC CPU runner.
 
-    Constructor params mirror the CLI flags one-for-one. ``run()`` returns
+    Constructor params mirror the CLI flags; ``pre_argv`` is also available
+    for library callers. ``run()`` returns
     a dict with the timing CSV path, JSON path, and per-benchmark records;
     the same content is written to ``<log_dir>.json`` next to ``<log_dir>.csv``.
+    It returns an exit_code instead of exiting the calling process.
+
+    Construction validates the SPEC tree and prepares output directories.
+    Running prints results, writes reports, and applies slimit to the calling
+    process (use slimit=-1 to leave its stack limit unchanged). Benchmark
+    commands change directory in child shells, not in the calling process.
 
     For wrappers: prefer ``pre_argv=["qemu", ..., "-D", "{log}", "--"]`` over
     ``cmd_prefix="qemu ... -D %s --"`` — list form avoids shell-quoting bugs.
@@ -228,7 +240,11 @@ class Runner:
                  dup_exe=False,
                  slimit=2048,
                  match_substring=False,
-                 timeout=None):
+                 timeout=None,
+                 repeat=1):
+        if isinstance(repeat, bool) or not isinstance(repeat, int) or repeat < 1:
+            raise ValueError("repeat must be a positive integer")
+        self.repeat = repeat
         self.spec_dir = os.path.abspath(dir)
         self.exe_dir = os.path.abspath(exe) if exe else ""
         self.benchmark_arg = benchmark
@@ -297,7 +313,7 @@ class Runner:
 
         if result_dir is None:
             result_dir = os.path.expanduser("~") + "/runspec_result"
-        self.result_dir = result_dir
+        self.result_dir = os.path.abspath(os.path.expanduser(result_dir))
         os.makedirs(self.result_dir, exist_ok=True)
 
         self.stamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S") if stamp == "time" else stamp
@@ -305,7 +321,9 @@ class Runner:
         # the remapped one) so existing wrappers find the same path.
         self.log_dir = f"{self.result_dir}/{self.title}_{self.spec}_{self.size}_{self.stamp}"
         self.csv_path = self.log_dir + ".csv"
+        self.detail_csv_path = self.log_dir + ".detail.csv"
         self.json_path = self.log_dir + ".json"
+        self._active_log_dir = self.log_dir
 
         if not self.dry_run and self._cmd_uses_log_dir():
             os.makedirs(self.log_dir, exist_ok=True)
@@ -366,9 +384,6 @@ class Runner:
 
     def _score_type(self, benchmark):
         return "int" if benchmark in self.CINT else "xfp"
-
-    def _log_path(self, benchmark, index):
-        return f"{self.log_dir}/{self._intfp_prefix(benchmark)}{benchmark}_{index}{self.suffix}"
 
     def _build_prefix(self, logfile):
         if self.pre_argv is not None:
@@ -438,16 +453,18 @@ class Runner:
                     cmd = " ".join([realpath_exe] + cmd_sp[1:])
             if self.dup_exe:
                 cmd = cmd.strip().split()[0] + " " + cmd
-            logfile = self._log_path(benchmark, index)
+            logfile = f"{self._active_log_dir}/{self._intfp_prefix(benchmark)}{benchmark}_{index}{self.suffix}"
             logs.append(logfile)
             if self.redirect_stderr:
-                stderr = logfile + ".stderr"
+                stderr = shlex.quote(logfile + ".stderr")
             prefix = self._build_prefix(logfile)
             full = " ".join([prefix, cmd,
                              f"<{stdin}" if stdin else "",
                              f"1>{stdout}" if stdout else "",
                              f"2>{stderr}" if stderr else ""])
             cmds.append(full)
+        if not cmds:
+            raise RuntimeError(f"no commands found in {speccmds_filename}")
         return cmds, logs
 
     def _select(self):
@@ -490,7 +507,7 @@ class Runner:
         cmds, logs = self._build_cmds(benchmark, os.path.join(work_dir, "speccmds.cmd"))
         reftime = self._get_reftime(benchmark)
 
-        begin = time.time()
+        begin = time.perf_counter()
         exit_code = 0
         for cmd in cmds:
             full_cmd = f"cd {shlex.quote(work_dir)} && {cmd}"
@@ -505,8 +522,8 @@ class Runner:
                     exit_code = rc
                     if not self.loose:
                         break
-        runtime = time.time() - begin
-        ratio = (reftime / runtime) if runtime > 0 else float("nan")
+        runtime = time.perf_counter() - begin
+        ratio = (reftime / runtime) if runtime > 0 and exit_code == 0 and not self.dry_run else float("nan")
         return {
             "name": benchmark,
             "score_type": self._score_type(benchmark),
@@ -519,48 +536,40 @@ class Runner:
             "work_dir": work_dir,
         }
 
+    def _failed_result(self, benchmark, error):
+        print(f"[!] {benchmark}: {error}", file=sys.stderr)
+        return {
+            "name": benchmark, "score_type": self._score_type(benchmark),
+            "reftime": None, "runtime": None, "ratio": float("nan"),
+            "exit_code": 1, "error": str(error),
+            "logs": [], "cmds": [], "work_dir": self._work_dir(benchmark),
+        }
+
     def _run_st(self, selected):
         results = []
-
-        # 按 score_type 分组
-        int_benchmarks = [b for b in selected if self._score_type(b) == "int"]
-        xfp_benchmarks = [b for b in selected if self._score_type(b) == "xfp"]
-
-        # 执行 INT benchmarks
-        if int_benchmarks:
-            for b in int_benchmarks:
-                r = self.run_single(b)
+        for score_type in ("int", "xfp"):
+            group = []
+            for b in selected:
+                if self._score_type(b) != score_type:
+                    continue
+                try:
+                    r = self.run_single(b)
+                except (OSError, RuntimeError) as e:
+                    r = self._failed_result(b, e)
                 results.append(r)
+                group.append(r)
                 if not self.dry_run:
-                    print("%20s\t%.1f\t%.3f\t%.3f" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                    values = [r[key] if r[key] is not None else float("nan")
+                              for key in ("reftime", "runtime", "ratio")]
+                    print("%20s\t%.1f\t%.3f\t%.3f" % (r["name"], *values))
                 if r["exit_code"] and not self.loose:
-                    return results
-
-            # INT 完成后立即打印 INT score
+                    break
             if not self.dry_run:
-                int_ratios = self._valid_ratios(results)
-                if int_ratios:
-                    int_score = self._geomean_from_ratios(int_ratios)
-                    print("int score : %.3f" % int_score)
-
-        # 执行 FP benchmarks
-        if xfp_benchmarks:
-            for b in xfp_benchmarks:
-                r = self.run_single(b)
-                results.append(r)
-                if not self.dry_run:
-                    print("%20s\t%.1f\t%.3f\t%.3f" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
-                if r["exit_code"] and not self.loose:
-                    return results
-
-            # FP 完成后立即打印 FP score
-            if not self.dry_run:
-                xfp_results = [r for r in results if r["score_type"] == "xfp"]
-                xfp_ratios = self._valid_ratios(xfp_results)
-                if xfp_ratios:
-                    xfp_score = self._geomean_from_ratios(xfp_ratios)
-                    print("xfp score : %.3f" % xfp_score)
-
+                score = self._score(group)
+                if score is not None:
+                    print("%s score : %.3f" % (score_type, score))
+            if group and group[-1]["exit_code"] and not self.loose:
+                return results
         return results
 
     def _run_mt(self, selected):
@@ -569,10 +578,16 @@ class Runner:
         all_tasks = []  # list of (benchmark, work_dir, raw_cmd, full_task_str, idx)
         for b in selected:
             work_dir = self._work_dir(b)
-            if not os.path.exists(work_dir):
-                raise FileNotFoundError(f"{work_dir} not existed")
-            cmds, logs = self._build_cmds(b, os.path.join(work_dir, "speccmds.cmd"))
-            reftime = self._get_reftime(b)
+            try:
+                if not os.path.exists(work_dir):
+                    raise FileNotFoundError(f"{work_dir} not existed")
+                cmds, logs = self._build_cmds(b, os.path.join(work_dir, "speccmds.cmd"))
+                reftime = self._get_reftime(b)
+            except (OSError, RuntimeError) as e:
+                bench_info[b] = self._failed_result(b, e)
+                if not self.loose:
+                    break
+                continue
             bench_info[b] = {
                 "name": b, "score_type": self._score_type(b),
                 "reftime": reftime, "runtime": 0.0,
@@ -596,9 +611,9 @@ class Runner:
 
         def _run(task_tuple):
             _, _, _, task_str, _ = task_tuple
-            t0 = time.time()
+            t0 = time.perf_counter()
             rc = _run_shell(task_str, self.timeout)
-            return rc, time.time() - t0
+            return rc, time.perf_counter() - t0
 
         failures = []
         with ThreadPoolExecutor(max_workers=self.threads) as executor:
@@ -620,6 +635,8 @@ class Runner:
                     else:
                         print(f"[{now}] SUCCESS: {b} #{idx}")
                 except Exception as e:
+                    bench_info[b]["exit_code"] = 1
+                    bench_info[b]["error"] = str(e)
                     print(f"FAIL: {b} #{idx}  exception: {e}")
                     failures.append((b, idx, task_str))
 
@@ -633,85 +650,107 @@ class Runner:
             print("=" * 60)
 
         for info in bench_info.values():
-            if info["runtime"] > 0 and not math.isnan(info["reftime"]):
+            if info["exit_code"] == 0 and info["runtime"] > 0 and not math.isnan(info["reftime"]):
                 info["ratio"] = info["reftime"] / info["runtime"]
         return list(bench_info.values())
 
     @staticmethod
-    def _valid_ratios(results):
-        return [r["ratio"] for r in results
-                if r["ratio"] is not None and not math.isnan(r["ratio"]) and r["ratio"] > 0]
+    def _valid_sample(result):
+        return (result["exit_code"] == 0
+                and result["runtime"] is not None
+                and math.isfinite(result["runtime"]) and result["runtime"] > 0
+                and result["ratio"] is not None
+                and math.isfinite(result["ratio"]) and result["ratio"] > 0)
 
     @staticmethod
-    def _geomean_from_ratios(ratios):
+    def _score(results):
+        ratios = [r["ratio"] for r in results if Runner._valid_sample(r)]
         if not ratios:
             return None
         return math.exp(sum(math.log(r) for r in ratios) / len(ratios))
 
-    def _score_groups(self, results):
-        int_results = [r for r in results if r["name"] in self.CINT]
-        fp_results = [r for r in results if r["name"] in self.CFP]
-        groups = []
-        if int_results:
-            groups.append(int_results)
-        if fp_results:
-            groups.append(fp_results)
-        return groups
+    @staticmethod
+    def _score_groups(results):
+        for score_type in ("int", "xfp"):
+            group = [r for r in results if r["score_type"] == score_type]
+            if group:
+                yield score_type, group
 
     # ------------------------------------------------------------------ output
 
-    def _write_csv(self, results):
-        with open(self.csv_path, "w") as f:
-            for group_results in self._score_groups(results):
+    @staticmethod
+    def _print_group_scores(payload):
+        for label, key in (("int", "int_geomean"), ("xfp", "xfp_geomean")):
+            if payload[key] is not None:
+                print("%s score : %.3f" % (label, payload[key]))
+
+    def _write_csv(self, payload):
+        with open(payload["csv_path"], "w") as f:
+            for score_type, group_results in self._score_groups(payload["benchmarks"]):
                 for r in group_results:
-                    if r["reftime"] is None or r["runtime"] is None:
+                    if not self._valid_sample(r):
                         continue
-                    f.write("%s,%f,%f,%f\n" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
-                group_geomean = self._geomean_from_ratios(self._valid_ratios(group_results))
+                    f.write("%s,%.1f,%.3f,%.3f\n" % (r["name"], r["reftime"], r["runtime"], r["ratio"]))
+                group_geomean = payload[f"{score_type}_geomean"]
                 if group_geomean is not None:
-                    f.write("score,,,%s\n" % group_geomean)
+                    f.write("score,,,%.3f\n" % group_geomean)
 
     def _write_json(self, payload):
-        with open(self.json_path, "w") as f:
+        with open(payload["json_path"], "w") as f:
             json.dump(_json_safe(payload), f, indent=2)
 
-    def run(self):
-        self._apply_slimit()
-        if not self.dry_run:
-            print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+    def _write_detail_csv(self, payload, samples):
+        iterations = {run["iteration"]: run for run in payload["iterations"]}
+        with open(payload["detail_csv_path"], "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f, lineterminator="\n")
+            writer.writerow(["benchmark", "reftime"]
+                            + [f"runtime{i}" for i in range(1, self.repeat + 1)]
+                            + [f"ratio{i}" for i in range(1, self.repeat + 1)]
+                            + ["median_ratio"])
+            for score_type, group in self._score_groups(payload["benchmarks"]):
+                for r in group:
+                    valid = [sample if sample and self._valid_sample(sample) else None
+                             for sample in samples[r["name"]]]
+                    row = [r["name"], "" if r["reftime"] is None else f'{r["reftime"]:.1f}']
+                    for field in ("runtime", "ratio"):
+                        row.extend(f'{sample[field]:.3f}' if sample else "" for sample in valid)
+                    row.append(f'{r["ratio"]:.3f}' if self._valid_sample(r) else "")
+                    writer.writerow(row)
+                scores = []
+                key = f"{score_type}_geomean"
+                for i in range(1, self.repeat + 1):
+                    score = iterations.get(i, {}).get(key)
+                    scores.append("" if score is None else f"{score:.3f}")
+                median_score = payload[key]
+                scores.append("" if median_score is None else f"{median_score:.3f}")
+                writer.writerow(["score", ""] + [""] * self.repeat + scores)
 
-        selected = self._select()
+    def _summarize(self, samples):
         results = []
-        geomean = None
-        error = None
+        for b, runs in samples.items():
+            runs = [r for r in runs if r is not None]
+            valid = [r for r in runs if self._valid_sample(r)]
+            reftime = (valid or runs)[0]["reftime"] if runs else None
+            runtime = statistics.median(r["runtime"] for r in valid) if valid else None
+            failures = [r for r in runs if r["exit_code"]]
+            results.append({
+                "name": b,
+                "score_type": self._score_type(b),
+                "reftime": reftime,
+                "runtime": runtime,
+                "ratio": reftime / runtime if valid else float("nan"),
+                "exit_code": 0 if valid else (failures[0]["exit_code"] if failures else 1),
+                "successful_runs": len(valid),
+                "failed_runs": len(failures),
+                "missing_runs": self.repeat - len(runs),
+                "logs": [path for r in runs for path in r["logs"]],
+                "cmds": [cmd for r in runs for cmd in r["cmds"]],
+                "work_dir": self._work_dir(b),
+            })
+        return results
 
-        if not selected:
-            error = f"no benchmarks matched -b {self.benchmark_arg!r} for SPEC {self.spec}"
-            print(f"[!] {error}", file=sys.stderr)
-        elif self.threads == 1:
-            try:
-                results = self._run_st(selected)
-            except (FileNotFoundError, RuntimeError) as e:
-                error = str(e)
-                print(f"[!] {error}", file=sys.stderr)
-        else:
-            try:
-                results = self._run_mt(selected)
-            except (FileNotFoundError, RuntimeError) as e:
-                error = str(e)
-                print(f"[!] {error}", file=sys.stderr)
-
-        if results and not self.dry_run:
-            ratios = self._valid_ratios(results)
-            if ratios:
-                geomean = self._geomean_from_ratios(ratios)
-                print("score : %.3f" % geomean)
-
-        if not self.dry_run:
-            self._write_csv(results)
-            print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
-
-        if not results:
+    def _result_payload(self, results, log_dir, csv_path, json_path, error=None):
+        if error or not results:
             exit_code = 2
         elif any(r["exit_code"] for r in results):
             exit_code = 0 if self.loose else 1
@@ -720,26 +759,101 @@ class Runner:
 
         int_results = [r for r in results if r["score_type"] == "int"]
         xfp_results = [r for r in results if r["score_type"] == "xfp"]
-        int_geomean = self._geomean_from_ratios(self._valid_ratios(int_results))
-        xfp_geomean = self._geomean_from_ratios(self._valid_ratios(xfp_results))
-
         payload = {
             "spec_version": self.spec,
             "size": self.size,
             "tune": self.tune,
-            "log_dir": self.log_dir,
-            "csv_path": self.csv_path,
-            "json_path": self.json_path,
+            "log_dir": log_dir,
+            "csv_path": csv_path,
+            "json_path": json_path,
             "benchmarks": results,
-            "geomean": geomean,
-            "int_geomean": int_geomean,
-            "xfp_geomean": xfp_geomean,
+            "geomean": self._score(results),
+            "int_geomean": self._score(int_results),
+            "xfp_geomean": self._score(xfp_results),
             "exit_code": exit_code,
         }
         if error is not None:
             payload["error"] = error
+        return payload
+
+    def run(self):
+        self._apply_slimit()
         if not self.dry_run:
+            print("begin : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
+
+        selected = self._select()
+        samples = {b: [None] * self.repeat for b in selected}
+        iterations = []
+        error = None
+        if not selected:
+            error = f"no benchmarks matched -b {self.benchmark_arg!r} for SPEC {self.spec}"
+            print(f"[!] {error}", file=sys.stderr)
+
+        execute = self._run_st if self.threads == 1 else self._run_mt
+        previous_log_dir = self._active_log_dir
+        try:
+            for i in range(1, self.repeat + 1):
+                if not selected:
+                    break
+                log_dir = self.log_dir
+                csv_path, json_path = self.csv_path, self.json_path
+                if self.repeat > 1:
+                    print(f"run {i}/{self.repeat}", file=sys.stderr)
+                    log_dir = os.path.join(self.log_dir, f"run_{i:03d}")
+                    csv_path = os.path.join(log_dir, "result.csv")
+                    json_path = os.path.join(log_dir, "result.json")
+                    if not self.dry_run:
+                        os.makedirs(log_dir, exist_ok=True)
+                self._active_log_dir = log_dir
+                results = []
+                try:
+                    results = execute(selected)
+                except (OSError, RuntimeError) as e:
+                    error = str(e)
+                    print(f"[!] {error}", file=sys.stderr)
+
+                run = self._result_payload(results, log_dir, csv_path, json_path, error)
+                run["iteration"] = i
+                iterations.append(run)
+                for result in results:
+                    samples[result["name"]][i - 1] = result
+                if not self.dry_run:
+                    if self.threads != 1:
+                        self._print_group_scores(run)
+                    if self.repeat > 1 and run["geomean"] is not None:
+                        print("score : %.3f" % run["geomean"])
+                    if self.repeat > 1:
+                        self._write_csv(run)
+                        self._write_json(run)
+                if error or (not self.loose and run["exit_code"]):
+                    break
+        finally:
+            self._active_log_dir = previous_log_dir
+
+        if self.repeat == 1:
+            results = iterations[0]["benchmarks"] if iterations else []
+        else:
+            results = self._summarize(samples)
+        payload = self._result_payload(results, self.log_dir, self.csv_path, self.json_path, error)
+        # Successful samples may coexist with failures in other iterations.
+        # Preserve the overall failure status even when a median is available.
+        if iterations:
+            payload["exit_code"] = max(run["exit_code"] for run in iterations)
+        payload.update({
+            "repeat": self.repeat,
+            "detail_csv_path": self.detail_csv_path,
+            "iterations": iterations,
+        })
+        if not self.dry_run:
+            if self.repeat > 1 and payload["geomean"] is not None:
+                print("median summary:", file=sys.stderr)
+                self._print_group_scores(payload)
+            if payload["geomean"] is not None:
+                print("score : %.3f" % payload["geomean"])
+            self._write_csv(payload)
+            self._write_detail_csv(payload, samples)
             self._write_json(payload)
+            print("end   : ", datetime.now().strftime("%d/%m/%Y %H:%M:%S"))
         return payload
 
 
@@ -760,6 +874,8 @@ def _make_parser():
     p.add_argument('--suffix', default="", help="suffix of output file")
     p.add_argument('-t', '--threads', default=1, type=int,
                    help="Allow N jobs at once;")
+    p.add_argument('--repeat', default=1, type=int,
+                   help="run the suite N times and summarize median runtimes (positive integer; default: 1)")
     p.add_argument('--redirect_stderr', action='store_true',
                    help="redirect stderr to logfile.stderr")
     p.add_argument('-l', '--loose', action='store_true', help="ignore errors")
@@ -810,6 +926,7 @@ def _cli():
             result_dir=args.result_dir, copy_exe=not args.no_copy_exe,
             dup_exe=args.dup_exe, slimit=args.slimit,
             match_substring=args.match_substring, timeout=args.timeout,
+            repeat=args.repeat,
         )
     except (FileNotFoundError, ValueError, RuntimeError) as e:
         print(str(e))
